@@ -2,6 +2,16 @@
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
 (use input-parse)
+(use srfi-69)
+
+(define *recorder*
+  (make-parameter
+    (let ((data (make-hash-table)))
+      (lambda (arg . args)
+        (cond
+          ((eqv? arg 'get) data)
+          ((null? args) (hash-table-ref data arg))
+          (else (hash-table-set! data arg (car args))))))))
 
 ;; A stopgap until we figure out how to detect terminal height
 (define +screen-lines+ 20)
@@ -27,13 +37,13 @@
            (lambda ()
              (if (> page pages)
                #f
-               (let* ((start (* page +screen-lines*))
+               (let* ((start (* page +screen-lines+))
                       (end (min (+ start +screen-lines+) len)))
                  (let loop ((i start))
                    (if (>= i end)
                      (begin
                        (newline)
-                       (display prompt-msg ": "))
+                       (display (string-append prompt-msg ": ")))
                      (begin
                        (let ((new-i (+ 1 i)))
                          (print new-i ") " (list-ref choices i))
