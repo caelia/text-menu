@@ -20,33 +20,88 @@
            (redis-hset item arg (car args))))))))
 
 
-(define-enum 'vendors extensible: #t)
+(register-enum 'vendors extensible: #t)
 
-(define-enum 'categories elts: '("metals" "stones" "parts" "tools" "supplies" "admin"))
+(register-enum 'categories elts: '("metals" "stones" "parts" "tools" "supplies" "admin"))
 
-(define-enum 'materials extensible: #t elts: '("Ag925" "Cu110" "Argentium" "AgFine"))
+(register-enum 'materials extensible: #t elts: '("Ag925" "Cu110" "Argentium" "AgFine"))
 
-(define-enum 'metal-forms extensible: #t elts: '("sheet" "tube" "wire"))
+(register-enum 'metal-forms extensible: #t elts: '("sheet" "tube" "wire"))
 
-(define-enum 'metal-shapes extensible: #t elts: '("round" "square" "rectangular"))
+(register-enum 'metal-shapes extensible: #t elts: '("round" "square" "rectangular"))
 
-(define-enum 'stone-forms extensible: #t elts: '("cabochon" "faceted" "bead" "raw"))
+(register-enum 'stone-forms extensible: #t elts: '("cabochon" "faceted" "bead" "raw"))
 
-(define-enum 'stone-shapes extensible: #t elts: '("round" "ellipse" "square" "rect" "triangle" "trapezoid" "irregular"))
+(register-enum 'stone-shapes extensible: #t elts: '("round" "ellipse" "square" "rect" "triangle" "trapezoid" "irregular"))
 
-(define-step 'category
-             type: (enum categories)
-             default: (*current-category*)
-             next: 'purchase-date)
+(register-enum 'units extensible: #t elts: '("in" "sq-in" "ft" "sq-ft" "mm" "sq-mm" "cm" "sq-cm" "lb" "oz" "ozt"))
 
-(define-step 'purchase-date
-             type: string
-             validator: date
-             next: 'vendor)
+(set-step! 'category
+           type: (enum categories)
+           default: (*current-category*)
+           next: 'purchase-date-year)
 
-(define-step 'vendor
-             type: (enum vendors)
-             next: 'refnum)
+(set-step! 'purchase-date-year
+           type: string
+           validator: 'date
+           next: 'vendor)
 
-(define-step 'refnum
-             type: string)
+(set-step! 'vendor
+           type: (enum vendors)
+           next: 'refnum)
+
+(set-step! 'refnum
+           type: string
+           branch: [((or (eqv? category "metals") (eqv? category "stones"))
+                     'material)
+                    (else
+                      'item-type)])
+
+(set-step! 'material
+           type: (enum materials)
+           branch: [((eqv? category "metals") 'metal-form)
+                    ((eqv? category "stones") 'stone-form)]
+
+(set-step! 'metal-form
+           type: (enum metal-forms)
+           next: 'metal-shape)
+
+(set-step! 'metal-shape
+           required: #f
+           type: (enum metal-shapes))
+
+(set-step! 'stone-form
+           type: (enum stone-forms)
+           next: 'stone-shape)
+
+(set-step! 'stone-shape
+           type: (enum stone-shapes)
+           next: 'stone-color)
+
+(set-step! 'stone-color
+           type: string
+           next: 'quantity)
+
+(set-step! 'item-type
+           type: string
+           next: 'quantity)
+
+(set-step! 'unit
+           type: (enum units)
+           next: 'quantity)
+
+(set-step! 'quantity
+           type: number
+           next: 'lot-price)
+
+(set-step! 'lot-price
+           type: (float 3)
+           next: 'notes)
+
+(set-step! 'notes
+           required: #f
+           type: 'string
+           next: 'LOOP)
+
+
+(set-start 'category)
