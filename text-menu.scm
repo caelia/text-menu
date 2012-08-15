@@ -1,19 +1,30 @@
-;;; text-menu.scm -- Provides simple command-line menus and response handlers.
+
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
 (use input-parse)
 (use srfi-69)
 (use irregex)
+(use posix)
 
 
 ;;; ============================================================================
-;;; --  GLOBAL DATA STRUCTURES  ------------------------------------------------
+;;; --  GLOBAL DATA STRUCTURES & CONSTANTS  ------------------------------------
 
 (define *recorder*
   (make-parameter
+    (let ((data (make-hashtable)))
+      (lambda (arg . args)
+        (cond
+          ((eqv? arg 'get) data)
+          ((null? args) (hash-table-ref data arg))
+          (else (hash-table-set! data arg args)))))))
 
-;; A stopgap until we figure out how to detect terminal height
-(define +screen-lines+ 20)
+
+(define +screen-lines+
+  (let ((ts (terminal-size (current-output-port))))
+    (if (= ts 0)
+      20
+      (- ts 4))))
 
 (define *enums* (make-parameter (make-hash-table)))
 
@@ -24,11 +35,24 @@
 
 
 ;;; ============================================================================
+;;; --  COMPILED REGULAR EXPRESSIONS  ------------------------------------------
+
+(define yesno-rxp (irregex '(: (* whitespace) ("[NnYy]") (* whitespace))))
+
+(define blank-rxp (irregex '(* whitespace)))
+
+;;; ============================================================================
+
+
+
+;;; ============================================================================
 ;;; --  RESPONSE VALIDATORS  ---------------------------------------------------
+
+(define (blank? s)
+  (irregex-match blank-rxp s))
 
 (define (string-validator s) #t)
 
-(define yesno-rxp (irregex '(: (* whitespace) ("[NnYy]") (* whitespace))))
 (define (yesno-validator yn)
   (lambda (resp)
     (irregex-match yesno-rxp resp)))
@@ -157,6 +181,46 @@
   (display "Press RETURN to repeat, or 'q' to quit: "))
 
 ;;; ============================================================================
+
+
+
+;;; ============================================================================
+;;; --  MAIN INTERACTION  ------------------------------------------------------
+
+(define (interact)
+  (let loop ((step (*start-step*)))
+    (system "clear")
+    (step 'run)
+    (let ((resp (read-input-line))
+          (req (step 'required)))
+      (if (and req (blank? resp))
+        (begin
+          (print "Your input is required! Please enter a value.")
+          (sleep (*error-message-pause*))
+          (loop step))
+        (let ((vdor (step 'validator)))
+          (if (vdor resp)
+            (let ((record (step 'record))
+                  (action (step 'action))
+                  (next-step
+                    (or (step 'branch resp)
+                        (step 'next))))
+              (record resp)
+              (action resp)
+              (case next-step
+                ((END) #t)
+                ((LOOP) (loop (*start-step*)))      ; LOOP & loop? May not be portable.
+                (else (loop next-step))))
+            (begin
+              (print "Invalid input!")
+              (print (step 'valid-input-hint))
+              (sleep (*error-message-pause*))
+              (loop step))))))))
+
+
+;;; ============================================================================
+
+
 
 
 
