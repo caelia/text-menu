@@ -93,6 +93,45 @@
                 (memq (car args) elts*))))))
     (hash-table-set! (*enums*) enum-name enum)))
 
+(define (make-step-function step-tag menu type validator record action branch next valid-input-hint)
+  (lambda ()
+    (let loop ()
+      (let* ((raw-resp
+               (if menu
+                 (let loop* ((cmd 'start))
+                   (menu cmd)
+                   (let ((input (read-text-line)))
+                     (cond
+                       ((irregex-match next-rxp input) (loop* 'next))
+                       ((irregex-match prev-rxp input) (loop* 'previous))
+                       (else input))))
+                 (begin
+                   (if (eqv? type 'yesno)
+                     (prompt-for-yesno prompt-msg default)
+                     (prompt-for-string prompt-msg default)))))
+             (valid (validator* raw-resp)))
+        (if valid
+          (begin
+            (record step-tag raw-resp)
+            (action step-tag raw-resp)
+            (or (branch raw-resp) next))
+          (begin
+            (print "Invalid input!")
+            (print valid-input-hint)
+            (system "clear")
+            (sleep (*error-message-pause*))
+            (loop)))))))
+
+(define (make-get-simple-input prompt)
+
+(define (make-get-menu-input menu)
+
+(define (make-on-error hint)
+
+(define (make-process-input step-tag branch next)
+
+(define (make-step-function get-input validate on-error process)
+
 (define (set-step! step-tag #!key
                    (menu-msg "Please choose from the following options:")
                    (prompt-msg #f) (default '()) 
@@ -121,36 +160,40 @@
              (record (*recorder*))
              (else (lambda (k v) #f))))
          (action*
-           (or action (lambda (k v) #f))))
-         (step-function
+           (or action (lambda (k v) #f)))
+         (get-input-fun
+           (if menu
+             (lambda ()
+               (let loop* ((cmd 'start))
+                 (menu cmd)
+                 (let ((input (read-text-line)))
+                   (cond
+                     ((irregex-match next-rxp input) (loop* 'next))
+                     ((irregex-match prev-rxp input) (loop* 'previous))
+                     (else input)))))
+             (lambda ()
+               (display prompt)
+               (read-text-line))))
+         (on-error
            (lambda ()
-             (let loop ()
-               (let* ((raw-resp
-                        (if menu
-                          (let loop* ((cmd 'start))
-                            (menu cmd)
-                            (let ((input (read-text-line)))
-                              (cond
-                                ((irregex-match next-rxp input) (loop* 'next))
-                                ((irregex-match prev-rxp input) (loop* 'previous))
-                                (else input))))
-                          (begin
-                            (if (eqv? type 'yesno)
-                              (prompt-for-yesno prompt-msg default)
-                              (prompt-for-string prompt-msg default)))))
-                      (valid (validator* raw-resp)))
-                 (if valid
-                   (begin
-                     (record step-tag raw-resp)
-                     (action step-tag raw-resp)
-                     (or (branch raw-resp) next))
-                   (begin
-                     (print "Invalid input!")
-                     (print valid-input-hint)
-                     (system "clear")
-                     (sleep (*error-message-pause*))
-                     (loop))))))))
-  (hash-table-set! (*steps*) step-tag step-function))
+             (print "Invalid input!")
+             (print hint)
+             (sleep (*error-message-pause*))
+             (system "clear")))
+         (process
+           (lambda (input)
+             (record step-tag input)
+             (action step-tag input)
+             (or (branch input) next)))
+         (step-fun
+           (lambda ()
+             (let loop ((input (get-input)))
+               (if (validate input)
+                 (process input)
+                 (begin
+                   (on-error)
+                   (loop (get-input))))))))
+  (hash-table-set! (*steps*) step-tag step-fun))
 
 ;;; ============================================================================
 
