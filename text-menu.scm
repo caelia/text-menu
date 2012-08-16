@@ -10,15 +10,7 @@
 ;;; ============================================================================
 ;;; --  GLOBAL DATA STRUCTURES & CONSTANTS  ------------------------------------
 
-(define *recorder*
-  (make-parameter
-    (let ((data (make-hashtable)))
-      (lambda (arg . args)
-        (cond
-          ((eqv? arg 'get) data)
-          ((null? args) (hash-table-ref data arg))
-          (else (hash-table-set! data arg args)))))))
-
+(define *recorder* (make-parameter #f))
 
 (define +screen-lines+
   (let ((ts (terminal-size (current-output-port))))
@@ -75,10 +67,12 @@
 (define (set-recorder #!optional (recorder 'default))
   (if (eqv? recorder 'default)
     (*recorder*
-      (let ((data (make-hash-table)))
+      (let ((data (make-hash-table))
+            (step-tag #f))
         (lambda (arg . args)
           (cond
-            ((eqv? arg 'get) data)
+            ((eqv? arg 'init) (set! step-tag (car args)))
+            ((eqv? arg 'get) (list step-tag data))
             ((null? args) (hash-table-ref data arg))
             (else (hash-table-set! data arg (car args)))))))
     (*recorder*
@@ -99,10 +93,19 @@
                 (memq (car args) elts*))))))
     (hash-table-set! (*enums*) enum-name enum)))
 
-(define (set-step! step-id #!key
+(define (set-step! step-tag #!key
+                   (menu-msg "Please choose from the following options:")
+                   (prompt-msg #f) (default '()) 
                    (required #t) (type 'string) (validator #f)
-                   (action 'record) (next #f) (branch #f))
-  (let* ((validator*
+                   (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
+  (let* ((menu-msg* (or menu-msg "Please choose from the following options:"))
+         (menu
+           (if (and (list? type) (eqv? (car type) 'enum))
+             (let ((choices (hash-table-ref (*enums*) (cadr type)))
+                   (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
+               (choice-menu menu-msg prompt-msg choices))
+             #f))
+         (validator*
            (cond
              ((procedure? validator) validator)
              ((eqv? type 'string) string-validator)
@@ -112,16 +115,42 @@
              ((eqv? type 'float) float-validator)
              ((and (list? type) (eqv? (car type) 'enum))
               (enum-validator (cadr type)))))
+         (record*
+           (cond
+             ((procedure? record) record)
+             (record (*recorder*))
+             (else (lambda (k v) #f))))
          (action*
-           (if (eqv? action 'record)
-             '()
-             action))
-
-  (let ((step-function
-          (lambda 
-  (hash-table-set! (*steps*) step-id
-                   (lambda ()
-                     (let 
+           (or action (lambda (k v) #f))))
+         (step-function
+           (lambda ()
+             (let loop ()
+               (let* ((raw-resp
+                        (if menu
+                          (let loop* ((cmd 'start))
+                            (menu cmd)
+                            (let ((input (read-text-line)))
+                              (cond
+                                ((irregex-match next-rxp input) (loop* 'next))
+                                ((irregex-match prev-rxp input) (loop* 'previous))
+                                (else input))))
+                          (begin
+                            (if (eqv? type 'yesno)
+                              (prompt-for-yesno prompt-msg default)
+                              (prompt-for-string prompt-msg default)))))
+                      (valid (validator* raw-resp)))
+                 (if valid
+                   (begin
+                     (record step-tag raw-resp)
+                     (action step-tag raw-resp)
+                     (or (branch raw-resp) next))
+                   (begin
+                     (print "Invalid input!")
+                     (print valid-input-hint)
+                     (system "clear")
+                     (sleep (*error-message-pause*))
+                     (loop))))))))
+  (hash-table-set! (*steps*) step-tag step-function))
 
 ;;; ============================================================================
 
