@@ -22,6 +22,8 @@
 
 (define *steps* (make-parameter (make-hash-table)))
 
+(define *error-message-pause* (make-parameter 3))     ; value in seconds
+
 ;;; ============================================================================
 
 
@@ -29,9 +31,23 @@
 ;;; ============================================================================
 ;;; --  COMPILED REGULAR EXPRESSIONS  ------------------------------------------
 
-(define yesno-rxp (irregex '(: (* whitespace) ("[NnYy]") (* whitespace))))
+(define yesno-rxp (irregex '("[NnYy]")))
 
 (define blank-rxp (irregex '(* whitespace)))
+
+(define next-rxp (irregex '("[Nn]")))
+
+(define prev-rxp (irregex '("[Pp]")))
+
+(define number-rxp (irregex '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))))
+
+(define float-rxp (irregex '(: (? #\-) (* numeric) #\. (+ numeric))))
+
+(define integer-rxp (irregex '(: (? #\-) (+ numeric))))
+
+(define nonnegint-rxp (irregex '(+ numeric)))
+
+(define posint-rxp (irregex '(: (/ #\1 #\9) (* numeric))))
 
 ;;; ============================================================================
 
@@ -50,7 +66,19 @@
     (irregex-match yesno-rxp resp)))
 
 (define (number-validator n)
-  #f)
+  (irregex-match number-rxp n))
+
+(define (float-validator n)
+  (irregex-match float-rxp n))
+
+(define (integer-validator n)
+  (irregex-match integer-rxp n))
+
+(define (nonnegint-validator n)
+  (irregex-match nonnegint-rxp n))
+
+(define (posint-validator n)
+  (irregex-match posint-rxp n))
 
 (define (enum-validator enum-name)
   (let ((choices (hash-table-ref (*enums*) enum-name)))
@@ -93,58 +121,18 @@
                 (memq (car args) elts*))))))
     (hash-table-set! (*enums*) enum-name enum)))
 
-(define (make-step-function step-tag menu type validator record action branch next valid-input-hint)
-  (lambda ()
-    (let loop ()
-      (let* ((raw-resp
-               (if menu
-                 (let loop* ((cmd 'start))
-                   (menu cmd)
-                   (let ((input (read-text-line)))
-                     (cond
-                       ((irregex-match next-rxp input) (loop* 'next))
-                       ((irregex-match prev-rxp input) (loop* 'previous))
-                       (else input))))
-                 (begin
-                   (if (eqv? type 'yesno)
-                     (prompt-for-yesno prompt-msg default)
-                     (prompt-for-string prompt-msg default)))))
-             (valid (validator* raw-resp)))
-        (if valid
-          (begin
-            (record step-tag raw-resp)
-            (action step-tag raw-resp)
-            (or (branch raw-resp) next))
-          (begin
-            (print "Invalid input!")
-            (print valid-input-hint)
-            (system "clear")
-            (sleep (*error-message-pause*))
-            (loop)))))))
-
-(define (make-get-simple-input prompt)
-
-(define (make-get-menu-input menu)
-
-(define (make-on-error hint)
-
-(define (make-process-input step-tag branch next)
-
-(define (make-step-function get-input validate on-error process)
-
 (define (set-step! step-tag #!key
                    (menu-msg "Please choose from the following options:")
-                   (prompt-msg #f) (default '()) 
+                   (prompt-msg #f) (default '()) (valid-input-hint #f)
                    (required #t) (type 'string) (validator #f)
                    (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
-  (let* ((menu-msg* (or menu-msg "Please choose from the following options:"))
-         (menu
+  (let* ((menu
            (if (and (list? type) (eqv? (car type) 'enum))
              (let ((choices (hash-table-ref (*enums*) (cadr type)))
                    (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
                (choice-menu menu-msg prompt-msg choices))
              #f))
-         (validator*
+         (validate
            (cond
              ((procedure? validator) validator)
              ((eqv? type 'string) string-validator)
@@ -161,23 +149,24 @@
              (else (lambda (k v) #f))))
          (action*
            (or action (lambda (k v) #f)))
-         (get-input-fun
+         (get-input
            (if menu
              (lambda ()
-               (let loop* ((cmd 'start))
+               (let loop ((cmd 'start))
                  (menu cmd)
-                 (let ((input (read-text-line)))
+                 (let ((input (string-trim-both (read-text-line))))
                    (cond
-                     ((irregex-match next-rxp input) (loop* 'next))
-                     ((irregex-match prev-rxp input) (loop* 'previous))
+                     ((irregex-match next-rxp input) (loop 'next))
+                     ((irregex-match prev-rxp input) (loop 'previous))
                      (else input)))))
              (lambda ()
-               (display prompt)
-               (read-text-line))))
+               (display prompt-msg)
+               (string-trim-both (read-text-line)))))
          (on-error
            (lambda ()
              (print "Invalid input!")
-             (print hint)
+             (when valid-input-hint
+               (print valid-input-hint))
              (sleep (*error-message-pause*))
              (system "clear")))
          (process
@@ -193,7 +182,7 @@
                  (begin
                    (on-error)
                    (loop (get-input))))))))
-  (hash-table-set! (*steps*) step-tag step-fun))
+    (hash-table-set! (*steps*) step-tag step-fun)))
 
 ;;; ============================================================================
 
@@ -258,36 +247,6 @@
 
 ;;; ============================================================================
 ;;; --  MAIN INTERACTION  ------------------------------------------------------
-
-(define (interact)
-  (let loop ((step (*start-step*)))
-    (system "clear")
-    (step 'run)
-    (let ((resp (read-input-line))
-          (req (step 'required)))
-      (if (and req (blank? resp))
-        (begin
-          (print "Your input is required! Please enter a value.")
-          (sleep (*error-message-pause*))
-          (loop step))
-        (let ((vdor (step 'validator)))
-          (if (vdor resp)
-            (let ((record (step 'record))
-                  (action (step 'action))
-                  (next-step
-                    (or (step 'branch resp)
-                        (step 'next))))
-              (record resp)
-              (action resp)
-              (case next-step
-                ((END) #t)
-                ((LOOP) (loop (*start-step*)))      ; LOOP & loop? May not be portable.
-                (else (loop next-step))))
-            (begin
-              (print "Invalid input!")
-              (print (step 'valid-input-hint))
-              (sleep (*error-message-pause*))
-              (loop step))))))))
 
 
 ;;; ============================================================================
