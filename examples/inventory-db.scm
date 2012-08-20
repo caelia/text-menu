@@ -37,65 +37,68 @@
 (register-enum 'units extensible: #t elts: '("in" "sq-in" "ft" "sq-ft" "mm" "sq-mm" "cm" "sq-cm" "lb" "oz" "ozt"))
 
 (set-step! 'category
-           type: (enum categories)
+           type: '(enum categories)
            default: (*current-category*)
            next: 'purchase-date-year)
 
 (set-step! 'purchase-date-year
-           type: string
+           type: 'string
            validator: 'date
            next: 'vendor)
 
 (set-step! 'vendor
-           type: (enum vendors)
+           type: '(enum vendors)
            next: 'refnum)
 
 (set-step! 'refnum
-           type: string
-           branch: [((or (eqv? category "metals") (eqv? category "stones"))
-                     'material)
-                    (else
-                      'item-type)])
+           type: 'string
+           branch: (lambda (resp)
+                     (let ((category (*current-category*)))
+                       (if (or (eqv? category "metals") (eqv? category "stones"))
+                         'material
+                         'item-type))))
 
 (set-step! 'material
-           type: (enum materials)
-           branch: [((eqv? category "metals") 'metal-form)
-                    ((eqv? category "stones") 'stone-form)]
+           type: '(enum materials)
+           branch: (lambda (resp)
+                     (cond
+                       ((eqv? category "metals") 'metal-form)
+                       ((eqv? category "stones") 'stone-form))))
 
 (set-step! 'metal-form
-           type: (enum metal-forms)
+           type: '(enum metal-forms)
            next: 'metal-shape)
 
 (set-step! 'metal-shape
            required: #f
-           type: (enum metal-shapes))
+           type: '(enum metal-shapes))
 
 (set-step! 'stone-form
-           type: (enum stone-forms)
+           type: '(enum stone-forms)
            next: 'stone-shape)
 
 (set-step! 'stone-shape
-           type: (enum stone-shapes)
+           type: '(enum stone-shapes)
            next: 'stone-color)
 
 (set-step! 'stone-color
-           type: string
+           type: 'string
            next: 'quantity)
 
 (set-step! 'item-type
-           type: string
+           type: 'string
            next: 'quantity)
 
 (set-step! 'unit
-           type: (enum units)
+           type: '(enum units)
            next: 'quantity)
 
 (set-step! 'quantity
-           type: number
+           type: 'number
            next: 'lot-price)
 
 (set-step! 'lot-price
-           type: (float 3)
+           type: 'float
            next: 'notes)
 
 (set-step! 'notes

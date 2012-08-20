@@ -1,14 +1,28 @@
-
+;;; text-menu.scm -- Provides simple command-line menus and response handlers.
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
 (use input-parse)
-(use srfi-69)
+; (use srfi-69)
+(use redis-client)   ; Don't really want this dependency, but need persistence.
+(use redis-extras)   ; See above
 (use irregex)
 (use posix)
+(use simple-sha1)
+
+
+(module text-menu
+        ( set-recorder!
+          register-enum
+          set-step!
+          run )
 
 
 ;;; ============================================================================
 ;;; --  GLOBAL DATA STRUCTURES & CONSTANTS  ------------------------------------
+
+(define *app-name* (make-parameter #f))
+
+(define *start-step* (make-parameter #f))
 
 (define *recorder* (make-parameter #f))
 
@@ -17,6 +31,21 @@
     (if (= ts 0)
       20
       (- ts 4))))
+
+;; A hash-table-like object that will eventually allow interchangeable storage
+;;   mechanisms. The current implementation depends on Redis.
+(define (make-hash-proxy proxy-tag)
+  (lambda (cmd . args)
+    (case cmd
+      ((get) (redis-hget proxy-tag (car args)))
+      ((set!) (redis-hset proxy-tag (car args) (cadr args)))
+      ((set-tag!) (set! proxy-tag (car args))))))
+
+(define (hash-proxy-ref proxy key)
+  (proxy 'get key))
+
+(define (hash-proxy-set! proxy key value)
+  (proxy 'set! key value))
 
 (define *enums* (make-parameter (make-hash-table)))
 
@@ -92,7 +121,7 @@
 ;;; ============================================================================
 ;;; --  ENVIRONMENT SETUP  -----------------------------------------------------
 
-(define (set-recorder #!optional (recorder 'default))
+(define (set-recorder! #!optional (recorder 'default))
   (if (eqv? recorder 'default)
     (*recorder*
       (let ((data (make-hash-table))
@@ -117,8 +146,12 @@
                 (if extensible
                   (set! elts* (append elts* args))
                   (abort "This enum is not extensible.")))
+               ((get)
+                elts*)
                ((mem?)
-                (memq (car args) elts*))))))
+                (memq (car args) elts*))
+               ((length)
+                (length *elts))))))
     (hash-table-set! (*enums*) enum-name enum)))
 
 (define (set-step! step-tag #!key
@@ -128,7 +161,7 @@
                    (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
   (let* ((menu
            (if (and (list? type) (eqv? (car type) 'enum))
-             (let ((choices (hash-table-ref (*enums*) (cadr type)))
+             (let ((choices ((hash-table-ref (*enums*) (cadr type)) 'get))
                    (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
                (choice-menu menu-msg prompt-msg choices))
              #f))
@@ -183,6 +216,13 @@
                    (on-error)
                    (loop (get-input))))))))
     (hash-table-set! (*steps*) step-tag step-fun)))
+
+(define (set-start! step-tag)
+  (*start-step* step-tag))
+
+(define (set-appname name)
+  (*app-name* name))
+
 
 ;;; ============================================================================
 
@@ -248,6 +288,25 @@
 ;;; ============================================================================
 ;;; --  MAIN INTERACTION  ------------------------------------------------------
 
+(define (run appname step-tag)
+  (*app-name* appname)
+  (*start-step* step-tag)
+  (redex-init appname)
+  (let loop ((step (hash-table-ref (*steps*) step-tag)))
+    (let ((result (step)))
+      (cond
+        ((eqv? result 'END)
+         #t)
+        ((eqv? result 'LOOP)
+         (let loop* ()
+           (loop-prompt)
+           (let ((choice (string-trim-both (read-text-line))))
+             (cond
+               ((irregex-match quit-rxp choice) #t)
+               ((string=? choice "") (loop (hash-table-ref (*steps*) (*start-step*))))
+               (else (loop*))))))
+        (else
+          (loop (hash-table-ref (*steps*) result)))))))
 
 ;;; ============================================================================
 
