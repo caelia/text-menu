@@ -8,6 +8,7 @@
 (use irregex)
 (use posix)
 (use simple-sha1)
+(use date-literals)
 
 
 (module text-menu
@@ -15,6 +16,14 @@
           register-enum
           set-step!
           run )
+
+        (import input-parse)
+        (import redis-client)
+        (import redis-extras)
+        (import irregex)
+        (import posix)
+        (import simple-sha1)
+        (import date-literals)
 
 
 ;;; ============================================================================
