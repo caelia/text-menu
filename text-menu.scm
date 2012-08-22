@@ -2,12 +2,12 @@
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
 (use input-parse)
-; (use srfi-69)
+(use srfi-69)
 (use redis-client)   ; Don't really want this dependency, but need persistence.
 (use redis-extras)   ; See above
 (use irregex)
 (use posix)
-(use simple-sha1)
+; (use simple-sha1)
 
 
 (module text-menu
@@ -15,6 +15,14 @@
           register-enum
           set-step!
           run )
+
+        (import scheme)
+        (import chicken)
+        (import redis-client)
+        (import redis-extras)
+        (import irregex)
+        (import posix)
+        ; (import simple-sha1)
 
 
 ;;; ============================================================================
