@@ -2,12 +2,12 @@
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
 (use input-parse)
-(use srfi-69)
+; (use srfi-69)
 (use redis-client)   ; Don't really want this dependency, but need persistence.
 (use redis-extras)   ; See above
 (use irregex)
 (use posix)
-; (use simple-sha1)
+(use date-literals)
 
 
 (module text-menu
@@ -18,11 +18,12 @@
 
         (import scheme)
         (import chicken)
+        (import input-parse)
         (import redis-client)
         (import redis-extras)
         (import irregex)
         (import posix)
-        ; (import simple-sha1)
+        (import date-literals)
 
 
 ;;; ============================================================================

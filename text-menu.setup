@@ -1,0 +1,6 @@
+(compile -s -d0 -O3 text-menu.scm -j text-menu)
+(compile -s -d0 -O3 text-menu.import.scm)
+(install-extension
+  'text-menu
+  '("text-menu.so" "text-menu.import.so")
+  '((version "0.1")))

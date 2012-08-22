@@ -1,0 +1,5 @@
+((license "BSD")
+ (category misc)
+ (depends redis-client redis-extras input-parse irregex simple-sha1 date-literals)
+ (author "Matt Gushee")
+ (synopsis "A library for constructing simple menu-driven text-mode interfaces."))
