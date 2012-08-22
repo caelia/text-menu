@@ -8,7 +8,7 @@
 (use irregex)
 (use posix)
 (use simple-sha1)
-(use date-literals)
+(use rfc3339)
 
 
 (module text-menu
@@ -23,7 +23,7 @@
         (import irregex)
         (import posix)
         (import simple-sha1)
-        (import date-literals)
+        (import rfc3339)
 
 
 ;;; ============================================================================
@@ -62,6 +62,14 @@
 
 (define *error-message-pause* (make-parameter 3))     ; value in seconds
 
+(define *allowed-years* (make-parameter '(1 3000)))
+
+(define *default-year* (make-parameter #f))
+
+(define *default-month* (make-parameter #f))
+
+(define *use-date-defaults* (make-parameter #t))
+
 ;;; ============================================================================
 
 
@@ -86,6 +94,13 @@
 (define nonnegint-rxp (irregex '(+ numeric)))
 
 (define posint-rxp (irregex '(: (/ #\1 #\9) (* numeric))))
+
+(define date-rxp
+  (irregex '(: (or
+                 (: (? (: (? (: (=> yr (** 1 4 numeric)) #\-)) (=> mo (** 1 2 numeric)) #\-)) (=> da (** 1 2 numeric)))
+                 (: (? (: (=> mo (** 1 2 numeric)) #\/)) (=> da (** 1 2 numeric)))
+                 (: (=> mo (** 1 2 numeric)) #\/ (=> da (** 1 2 numeric)) #\/ (=> yr (** 1 4 numeric)))
+                 ))))
 
 ;;; ============================================================================
 
@@ -122,6 +137,27 @@
   (let ((choices (hash-table-ref (*enums*) enum-name)))
     (lambda (resp)
       (memq resp choices))))
+
+(define (date-validator y m d)
+  (let* ((allowed (*allowed-years*))
+         (first-allowed
+           (or (and (number? allowed) allowed)
+               (car allowed)))
+         (last-allowed
+           (or (and (number? allowed) allowed)
+               (cadr allowed))))
+    (cond
+      ((< y first) #f)
+      ((> y last) #f)
+      ((< m 1) #f)
+      ((> m 12) #f)
+      ((< d 1) #f)
+      ((and (memv m '(1 3 5 7 8 10 12)) (> d 31)) #f)
+      ((and (memv m '(4 6 9 11)) (> d 30)) #f)
+      ((and (= m 2) (leap-year? y) (> d 29)) #f)
+      ((and (= m 2) (d 28)) #f)
+      (else #t))))
+
 
 ;;; ============================================================================
 
@@ -234,6 +270,22 @@
 
 
 ;;; ============================================================================
+
+
+
+;;; ============================================================================
+;;; --  UTILITY FUNCTIONS  -----------------------------------------------------
+
+(define (string->date s)
+  (let ((match (irregex-match date-rxp s)))
+    (and match
+         (list (string->number (irregex-match-substring match 'yr))
+               (string->number (irregex-match-substring match 'mo))
+               (string->number (irregex-match-substring match 'da)))))
+
+
+;;; ============================================================================
+
 
 
 ;;; ============================================================================
