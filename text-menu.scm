@@ -8,6 +8,7 @@
 (use irregex)
 (use posix)
 (use date-literals)
+(use s11n)
 
 
 (module text-menu
@@ -43,12 +44,12 @@
 
 ;; A hash-table-like object that will eventually allow interchangeable storage
 ;;   mechanisms. The current implementation depends on Redis.
-(define (make-hash-proxy proxy-tag)
-  (lambda (cmd . args)
-    (case cmd
-      ((get) (redis-hget proxy-tag (car args)))
-      ((set!) (redis-hset proxy-tag (car args) (cadr args)))
-      ((set-tag!) (set! proxy-tag (car args))))))
+; (define (make-hash-proxy proxy-tag)
+;   (lambda (cmd . args)
+;     (case cmd
+;       ((get) (redis-hget proxy-tag (car args)))
+;       ((set!) (redis-hset proxy-tag (car args) (cadr args)))
+;       ((set-tag!) (set! proxy-tag (car args))))))
 
 (define (hash-proxy-ref proxy key)
   (proxy 'get key))
@@ -56,9 +57,9 @@
 (define (hash-proxy-set! proxy key value)
   (proxy 'set! key value))
 
-(define *enums* (make-parameter (make-hash-table)))
+(define *enums* (make-parameter (make-hash-proxy "@enums")))
 
-(define *steps* (make-parameter (make-hash-table)))
+(define *steps* (make-parameter (make-hash-proxy "@steps")))
 
 (define *error-message-pause* (make-parameter 3))     ; value in seconds
 
@@ -92,6 +93,25 @@
 
 
 ;;; ============================================================================
+;;; --  UTILITY FUNCTIONS  -----------------------------------------------------
+
+;; Serialize any object to a string
+(define (obj->string o)
+  (with-output-to-string
+    (lambda ()
+      (serialize o))))
+
+;; Deserialize any object from a string
+(define (string->obj s)
+  (with-input-from-string s
+    (lambda ()
+      (deserialize))))
+
+;;; ============================================================================
+
+
+
+;;; ============================================================================
 ;;; --  RESPONSE VALIDATORS  ---------------------------------------------------
 
 (define (blank? s)
@@ -119,7 +139,7 @@
   (irregex-match posint-rxp n))
 
 (define (enum-validator enum-name)
-  (let ((choices (hash-table-ref (*enums*) enum-name)))
+  (let ((choices (string->obj (hash-proxy-ref (*enums*) enum-name))))
     (lambda (resp)
       (memq resp choices))))
 
@@ -130,17 +150,17 @@
 ;;; ============================================================================
 ;;; --  ENVIRONMENT SETUP  -----------------------------------------------------
 
-(define (set-recorder! #!optional (recorder 'default))
+(define (set-recorder! #!optional (recorder 'default) #!key (tag "@data"))
   (if (eqv? recorder 'default)
     (*recorder*
-      (let ((data (make-hash-table))
+      (let ((data (make-hash-proxy tag))
             (step-tag #f))
         (lambda (arg . args)
           (cond
             ((eqv? arg 'init) (set! step-tag (car args)))
             ((eqv? arg 'get) (list step-tag data))
-            ((null? args) (hash-table-ref data arg))
-            (else (hash-table-set! data arg (car args)))))))
+            ((null? args) (hash-proxy-ref data arg))
+            (else (hash-proxy-set! data arg (car args)))))))
     (*recorder*
       recorder)))
 
@@ -161,7 +181,7 @@
                 (memq (car args) elts*))
                ((length)
                 (length *elts))))))
-    (hash-table-set! (*enums*) enum-name enum)))
+    (hash-proxy-set! (*enums*) enum-name (obj->string enum))))
 
 (define (set-step! step-tag #!key
                    (menu-msg "Please choose from the following options:")
@@ -170,7 +190,7 @@
                    (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
   (let* ((menu
            (if (and (list? type) (eqv? (car type) 'enum))
-             (let ((choices ((hash-table-ref (*enums*) (cadr type)) 'get))
+             (let ((choices (string->obj (hash-proxy-ref (*enums*) (cadr type))))
                    (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
                (choice-menu menu-msg prompt-msg choices))
              #f))
@@ -224,7 +244,7 @@
                  (begin
                    (on-error)
                    (loop (get-input))))))))
-    (hash-table-set! (*steps*) step-tag step-fun)))
+    (hash-proxy-set! (*steps*) step-tag (obj->string step-fun))))
 
 (define (set-start! step-tag)
   (*start-step* step-tag))
@@ -234,6 +254,7 @@
 
 
 ;;; ============================================================================
+
 
 
 ;;; ============================================================================
@@ -301,7 +322,7 @@
   (*app-name* appname)
   (*start-step* step-tag)
   (redex-init appname)
-  (let loop ((step (hash-table-ref (*steps*) step-tag)))
+  (let loop ((step (string->obj (hash-proxy-ref (*steps*) step-tag))))
     (let ((result (step)))
       (cond
         ((eqv? result 'END)
@@ -312,17 +333,17 @@
            (let ((choice (string-trim-both (read-text-line))))
              (cond
                ((irregex-match quit-rxp choice) #t)
-               ((string=? choice "") (loop (hash-table-ref (*steps*) (*start-step*))))
+               ((string=? choice "") (loop (hash-proxy-ref (*steps*) (*start-step*))))
                (else (loop*))))))
         (else
-          (loop (hash-table-ref (*steps*) result)))))))
+          (loop (string->obj (hash-proxy-ref (*steps*) result))))))))
 
 ;;; ============================================================================
 
-
-
+)
 
 
 ;;; ============================================================================
 ;;; ----------------------------------------------------------------------------
 ;;; ============================================================================
+
