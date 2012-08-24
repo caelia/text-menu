@@ -11,14 +11,16 @@
 (use s11n)
 
 
-(module text-menu
-        ( set-recorder!
-          register-enum
-          set-step!
-          run )
+(module text-menu *
+;        ( set-recorder!
+;          register-enum
+;          set-step!
+;          run )
 
         (import scheme)
         (import chicken)
+        (import ports)
+        (import srfi-13)
         (import input-parse)
         (import redis-client)
         (import redis-extras)
@@ -51,11 +53,11 @@
 ;       ((set!) (redis-hset proxy-tag (car args) (cadr args)))
 ;       ((set-tag!) (set! proxy-tag (car args))))))
 
-(define (hash-proxy-ref proxy key)
-  (proxy 'get key))
-
-(define (hash-proxy-set! proxy key value)
-  (proxy 'set! key value))
+; (define (hash-proxy-ref proxy key)
+;   (proxy 'get key))
+; 
+; (define (hash-proxy-set! proxy key value)
+;   (proxy 'set! key value))
 
 (define *enums* (make-parameter (make-hash-proxy "@enums")))
 
@@ -65,11 +67,15 @@
 
 (define *allowed-years* (make-parameter '(1 3000)))
 
-(define *default-year* (make-parameter #f))
+(define *last-entered-year* (make-parameter #f))
 
-(define *default-month* (make-parameter #f))
+(define *last-entered-month* (make-parameter #f))
 
-(define *use-date-defaults* (make-parameter #t))
+(define *default-year-rule* (make-parameter 'last-or-current))    ; Could also be 'last, 'current, or 'none
+
+(define *default-month-rule* (make-parameter 'last-or-current))
+
+(define *assumed-century-rule* (make-parameter 'current))
 
 ;;; ============================================================================
 
@@ -78,13 +84,17 @@
 ;;; ============================================================================
 ;;; --  COMPILED REGULAR EXPRESSIONS  ------------------------------------------
 
-(define yesno-rxp (irregex '("[NnYy]")))
+(define yes-rxp (irregex '("Yy")))
+
+(define no-rxp (irregex '("Nn")))
 
 (define blank-rxp (irregex '(* whitespace)))
 
-(define next-rxp (irregex '("[Nn]")))
+(define next-rxp (irregex '("Nn")))
 
-(define prev-rxp (irregex '("[Pp]")))
+(define prev-rxp (irregex '("Pp")))
+
+(define quit-rxp (irregex '("Qq")))
 
 (define number-rxp (irregex '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))))
 
@@ -122,12 +132,59 @@
     (lambda ()
       (deserialize))))
 
-(define (string->date s)
+(define (string->ymd s)
   (let ((match (irregex-match date-rxp s)))
     (and match
          (list (string->number (irregex-match-substring match 'yr))
                (string->number (irregex-match-substring match 'mo))
-               (string->number (irregex-match-substring match 'da)))))
+               (string->number (irregex-match-substring match 'da))))))
+
+(define (get-default-year)
+  (case (*default-year-rule*)
+    ((last) (*last-entered-year*))
+    ((current) (get-current-year))
+    ((last-or-current) (or (*last-entered-year*) (get-current-year)))
+    ((none) #f)))
+
+(define (get-default-month)
+  (case (*default-month-rule*)
+    ((last) (*last-entered-month*))
+    ((current) (get-current-month))
+    ((last-or-current) (or (*last-entered-month*) (get-current-month)))
+    ((none) #f)))
+
+
+(define (canonicalize-date ymd)
+  (let ((y (car ymd))
+        (m (cadr ymd))
+        (d (caddr ymd)))
+    (when (and y (not m))
+      (error "Invalid date."))
+    (let ((y* (or y (get-default-year)))
+          (m* (or m (get-default-month))))
+      (when (or (not y*) (not m*))
+        (error "Invalid date."))
+      (let ((y**
+              (if (>= y* 100)
+                y*
+                (let* ((curyear (get-current-year))
+                       (curcent (get-current-century))
+                       (raw-result (+ y* curcent)))
+                  (case (*assumed-century-rule*)
+                    ((none)
+                     y*)
+                    ((current)
+                     raw-result)
+                    ((past)
+                     (if (> raw-result curyear)
+                       (- raw-result 100)
+                       raw-result))
+                    ((future)
+                     (if (< raw-result curyear)
+                       (+ raw-result 100)
+                       raw-result)))))))
+        (list y** m* d)))))
+
 
 ;;; ============================================================================
 
@@ -139,38 +196,46 @@
 (define (blank? s)
   (irregex-match blank-rxp s))
 
-(define (string-validator s) #t)
+(define (string-validator s) s)
 
 (define (yesno-validator yn)
-  (lambda (resp)
-    (irregex-match yesno-rxp resp)))
+  (cond
+    ((irregex-match yes-rxp yn) 'yes)
+    ((irregex-match no-rxp yn) 'no)
+    (else #f)))
 
 (define (number-validator n)
-  (irregex-match number-rxp n))
+  (and (irregex-match number-rxp n) n))
 
 (define (float-validator n)
-  (irregex-match float-rxp n))
+  (and (irregex-match float-rxp n) n))
 
 (define (integer-validator n)
-  (irregex-match integer-rxp n))
+  (and (irregex-match integer-rxp n) n))
 
 (define (nonnegint-validator n)
-  (irregex-match nonnegint-rxp n))
+  (and (irregex-match nonnegint-rxp n) n))
 
 (define (posint-validator n)
-  (irregex-match posint-rxp n))
+  (and (irregex-match posint-rxp n) n))
 
-(define (enum-validator enum-name)
-  (let ((choices (string->obj (hash-proxy-ref (*enums*) enum-name))))
+(define (enum-validator choices)
+  (let ((len (length choices)))
     (lambda (resp)
-      (memq resp choices))))
+      (let ((idx (string->number resp)))
+        (if (>= idx len)
+          #f
+          (list-ref choices idx))))))
 
-(define (date-validator y m d)
-  (let* ((allowed (*allowed-years*))
-         (first-allowed
+(define (date-validator ymd)
+  (let* ((y (car ymd))
+         (m (cadr ymd))
+         (d (caddr ymd))
+         (allowed (*allowed-years*))
+         (first
            (or (and (number? allowed) allowed)
                (car allowed)))
-         (last-allowed
+         (last
            (or (and (number? allowed) allowed)
                (cadr allowed))))
     (cond
@@ -181,9 +246,9 @@
       ((< d 1) #f)
       ((and (memv m '(1 3 5 7 8 10 12)) (> d 31)) #f)
       ((and (memv m '(4 6 9 11)) (> d 30)) #f)
-      ((and (= m 2) (leap-year? y) (> d 29)) #f)
-      ((and (= m 2) (d 28)) #f)
-      (else #t))))
+      ((and (= m 2) (not (leap-year? y)) (> d 28)) #f)
+      ((and (= m 2) (> d 29)) #f)
+      (else ymd))))
 
 
 ;;; ============================================================================
@@ -223,7 +288,7 @@
                ((mem?)
                 (memq (car args) elts*))
                ((length)
-                (length *elts))))))
+                (length elts*))))))
     (hash-proxy-set! (*enums*) enum-name (obj->string enum))))
 
 (define (set-step! step-tag #!key
@@ -231,10 +296,13 @@
                    (prompt-msg #f) (default '()) (valid-input-hint #f)
                    (required #t) (type 'string) (validator #f)
                    (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
-  (let* ((menu
+  (let* ((choices
            (if (and (list? type) (eqv? (car type) 'enum))
-             (let ((choices (string->obj (hash-proxy-ref (*enums*) (cadr type))))
-                   (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
+             (string->obj (hash-proxy-ref (*enums*) (cadr type)))
+             #f))
+         (menu
+           (if choices
+             (let ((prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
                (choice-menu menu-msg prompt-msg choices))
              #f))
          (validate
@@ -245,8 +313,8 @@
              ((eqv? type 'number) number-validator)
              ((eqv? type 'integer) integer-validator)
              ((eqv? type 'float) float-validator)
-             ((and (list? type) (eqv? (car type) 'enum))
-              (enum-validator (cadr type)))))
+             ((eqv? type 'date) date-validator)
+             (choices (enum-validator choices))))
          (record*
            (cond
              ((procedure? record) record)
@@ -255,18 +323,26 @@
          (action*
            (or action (lambda (k v) #f)))
          (get-input
-           (if menu
-             (lambda ()
-               (let loop ((cmd 'start))
-                 (menu cmd)
-                 (let ((input (string-trim-both (read-text-line))))
-                   (cond
-                     ((irregex-match next-rxp input) (loop 'next))
-                     ((irregex-match prev-rxp input) (loop 'previous))
-                     (else input)))))
-             (lambda ()
-               (display prompt-msg)
-               (string-trim-both (read-text-line)))))
+           (cond
+             (menu
+               (lambda ()
+                 (let loop ((cmd 'start))
+                   (menu cmd)
+                   (let ((input (string-trim-both (read-text-line))))
+                     (cond
+                       ((irregex-match next-rxp input) (loop 'next))
+                       ((irregex-match prev-rxp input) (loop 'previous))
+                       (else input))))))
+             ((eqv? type 'date)
+              (lambda ()
+                (display prompt-msg)
+                (let* ((input (string-trim-both (read-text-line)))
+                       (ymd (string->ymd input)))
+                  (canonicalize-date ymd))))
+             (else
+               (lambda ()
+                 (display prompt-msg)
+                 (string-trim-both (read-text-line))))))
          (on-error
            (lambda ()
              (print "Invalid input!")
@@ -275,10 +351,16 @@
              (sleep (*error-message-pause*))
              (system "clear")))
          (process
-           (lambda (input)
-             (record step-tag input)
-             (action step-tag input)
-             (or (branch input) next)))
+           (if (eqv? type 'date)
+             (lambda (input)
+               (process-date input)
+               (record* step-tag input)
+               (action* step-tag input)
+               (or (branch input) next))
+             (lambda (input)
+               (record* step-tag input)
+               (action* step-tag input)
+               (or (branch input) next))))
          (step-fun
            (lambda ()
              (let loop ((input (get-input)))
@@ -314,6 +396,36 @@
     (let ((defstring
             (if (car default) "Y/n" "y/N")))
       (prompt-for-string msg defstring))))
+
+(define (prompt-for-date msg)
+  (let* ((year
+           (case (*default-year-rule*)
+             ((none) #f)
+             ((last) (*last-entered-year*))
+             ((last-or-current) (or (*last-entered-year*)
+                                    (current-year)))
+             ((current) (current-year))))
+         (month
+           (if year
+             (case (*default-month-rule*)
+               ((none) #f)
+               ((last) (*last-entered-month*))
+               ((last-or-current) (or (*last-entered-month*)
+                                      (current-month)))
+               ((current) (current-month)))
+             #f))
+         (default-string
+           (if month
+             (sprintf "~A-~A" year month)
+             (if year
+               (number->string year)
+               #f))))
+    (if default-string
+      (prompt-for-string msg default-string)
+      (prompt-for-string msg))))
+
+           )
+
 
 ;; Making this a closure allows for paging
 (define (choice-menu head-msg prompt-msg choices)
