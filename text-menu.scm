@@ -27,7 +27,7 @@
         (import redis-extras)
         (import irregex)
         (import posix)
-        (import srfi-19)    ; Not using this yet
+        (import srfi-19) 
         (import s11n)
 
 
@@ -244,8 +244,10 @@
 (define (posint-validator n)
   (and (irregex-match posint-rxp n) n))
 
-(define (enum-validator choices)
-  (let ((len (length choices)))
+(define (enum-validator enum)
+  (let* ((choices (enum 'choices))
+         (extensible (enum 'extensible?))
+         (len (length choices)))
     (lambda (resp)
       (let ((idx (string->number resp)))
         (if (>= idx len)
@@ -310,7 +312,7 @@
 
 
 ;; Making this a closure allows for paging
-(define (choice-menu head-msg prompt-msg choices)
+(define (choice-menu head-msg prompt-msg choices #!optional (extensible #f))
   (let* ((page 0)
          (len (length choices))
          (pages (quotient len +screen-lines+))
@@ -370,22 +372,21 @@
       recorder)))
 
 (define (register-enum enum-name #!key (extensible #f) (elts '()))
-  (let* ((elts* elts)
-         (enum
+  (let* ((enum
            (lambda (cmd . args)
              (case cmd
                ((extensible?)
                 extensible)
                ((add)
                 (if extensible
-                  (set! elts* (append elts* args))
+                  (set! elts (append elts args))
                   (abort "This enum is not extensible.")))
-               ((get)
-                elts*)
+               ((choices)
+                elts)
                ((mem?)
-                (memq (car args) elts*))
+                (memq (car args) elts))
                ((length)
-                (length elts*))))))
+                (length elts))))))
     (hash-proxy-set! (*enums*) enum-name (obj->string enum))))
 
 (define (set-step! step-tag #!key
@@ -393,14 +394,19 @@
                    (prompt-msg #f) (default '()) (valid-input-hint #f)
                    (required #t) (type 'string) (validator #f)
                    (record #t) (action #f) (next 'END) (branch (lambda (resp) #f)))
-  (let* ((choices
+  (let* ((enum
            (if (and (list? type) (eqv? (car type) 'enum))
              (string->obj (hash-proxy-ref (*enums*) (cadr type)))
              #f))
+         (choices (and enum (enum 'choices)))
          (menu
            (if choices
-             (let ((prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
-               (choice-menu menu-msg prompt-msg choices))
+             (let ((choices*
+                     (if (enum 'extensible?)
+                       (append choices (list "Add New"))
+                       choices))
+                   (prompt-msg* (or prompt-msg "Enter the number of your choice: ")))
+               (choice-menu menu-msg prompt-msg choices*))
              #f))
          (validate
            (cond
@@ -411,7 +417,7 @@
              ((eqv? type 'integer) integer-validator)
              ((eqv? type 'float) float-validator)
              ((eqv? type 'date) date-validator)
-             (choices (enum-validator choices))))
+             (enum (enum-validator enum))))
          (record*
            (cond
              ((procedure? record) record)

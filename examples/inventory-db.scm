@@ -1,11 +1,11 @@
-(use redis-client)
+(use redis-extras)
+(use text-menu)
 
-(include "text-menu.scm")
 
 (define *current-category* (make-parameter "metals"))
 
 (define (init)
-  (redis-connect "localhost" 6379)
+  (redex-init "studio-inventory")
   (let ((item #f))
     (*recorder*
       (lambda (arg . args)
