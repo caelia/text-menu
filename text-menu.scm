@@ -19,6 +19,7 @@
 
         (import scheme)
         (import chicken)
+        (import extras)
         (import ports)
         (import srfi-13)
         (import input-parse)
@@ -28,6 +29,23 @@
         (import posix)
         (import srfi-19)
         (import s11n)
+
+
+;;; ============================================================================
+;;; --  SYNTAX DEFINITIONS  ----------------------------------------------------
+
+(define-syntax short-year-conversions
+  (syntax-rules ()
+     ((_ (y0 y1 op addend) ...)
+      (lambda (y)
+        (cond
+          ((and (>= y y0) (<= y y1)) (op y addend))
+          ...
+          (else y))))))
+
+;;; ============================================================================
+
+
 
 ;;; ============================================================================
 ;;; --  GLOBAL DATA STRUCTURES & CONSTANTS  ------------------------------------
@@ -75,7 +93,7 @@
 
 (define *default-month-rule* (make-parameter 'last-or-current))
 
-(define *assumed-century-rule* (make-parameter 'current))
+(define *short-year-converter* (make-parameter (short-year-conversions (60 99 + 1900) (0 59 + 2000))))
 
 ;;; ============================================================================
 
@@ -132,6 +150,12 @@
     (lambda ()
       (deserialize))))
 
+(define (ymd->string ymd)
+  (let ((y (car ymd))
+        (m (cadr ymd))
+        (d (caddr ymd)))
+
+
 (define (string->ymd s)
   (let ((match (irregex-match date-rxp s)))
     (and match
@@ -139,18 +163,26 @@
                (string->number (irregex-match-substring match 'mo))
                (string->number (irregex-match-substring match 'da))))))
 
+(define (current-year)
+  (let ((t (seconds->local-time (current-seconds))))
+    (+ (vector-ref t 5) 1900)))
+
+(define (current-month)
+  (let ((t (seconds->local-time (current-seconds))))
+    (+ (vector-ref t 4) 1)))
+
 (define (get-default-year)
   (case (*default-year-rule*)
     ((last) (*last-entered-year*))
-    ((current) (get-current-year))
-    ((last-or-current) (or (*last-entered-year*) (get-current-year)))
+    ((current) (current-year))
+    ((last-or-current) (or (*last-entered-year*) (current-year)))
     ((none) #f)))
 
 (define (get-default-month)
   (case (*default-month-rule*)
     ((last) (*last-entered-month*))
-    ((current) (get-current-month))
-    ((last-or-current) (or (*last-entered-month*) (get-current-month)))
+    ((current) (current-month))
+    ((last-or-current) (or (*last-entered-month*) (current-month)))
     ((none) #f)))
 
 
@@ -167,22 +199,10 @@
       (let ((y**
               (if (>= y* 100)
                 y*
-                (let* ((curyear (get-current-year))
-                       (curcent (get-current-century))
-                       (raw-result (+ y* curcent)))
-                  (case (*assumed-century-rule*)
-                    ((none)
-                     y*)
-                    ((current)
-                     raw-result)
-                    ((past)
-                     (if (> raw-result curyear)
-                       (- raw-result 100)
-                       raw-result))
-                    ((future)
-                     (if (< raw-result curyear)
-                       (+ raw-result 100)
-                       raw-result)))))))
+                (let ((conv (*short-year-converter*)))
+                  (if conv (conv y*) y*)))))
+        (*last-entered-year* y**)
+        (*last-entered-month* m*)
         (list y** m* d)))))
 
 
@@ -351,16 +371,10 @@
              (sleep (*error-message-pause*))
              (system "clear")))
          (process
-           (if (eqv? type 'date)
-             (lambda (input)
-               (process-date input)
-               (record* step-tag input)
-               (action* step-tag input)
-               (or (branch input) next))
-             (lambda (input)
-               (record* step-tag input)
-               (action* step-tag input)
-               (or (branch input) next))))
+           (lambda (input)
+             (record* step-tag input)
+             (action* step-tag input)
+             (or (branch input) next)))
          (step-fun
            (lambda ()
              (let loop ((input (get-input)))
@@ -398,22 +412,8 @@
       (prompt-for-string msg defstring))))
 
 (define (prompt-for-date msg)
-  (let* ((year
-           (case (*default-year-rule*)
-             ((none) #f)
-             ((last) (*last-entered-year*))
-             ((last-or-current) (or (*last-entered-year*)
-                                    (current-year)))
-             ((current) (current-year))))
-         (month
-           (if year
-             (case (*default-month-rule*)
-               ((none) #f)
-               ((last) (*last-entered-month*))
-               ((last-or-current) (or (*last-entered-month*)
-                                      (current-month)))
-               ((current) (current-month)))
-             #f))
+  (let* ((year (get-default-year))
+         (month (if year (get-default-year) #f))
          (default-string
            (if month
              (sprintf "~A-~A" year month)
