@@ -27,7 +27,7 @@
         (import redis-extras)
         (import irregex)
         (import posix)
-        (import srfi-19)
+        (import srfi-19)    ; Not using this yet
         (import s11n)
 
 
@@ -150,10 +150,15 @@
     (lambda ()
       (deserialize))))
 
+;; I think eventually we will use srfi-19 for this, but let's keep it simple for now.
 (define (ymd->string ymd)
   (let ((y (car ymd))
         (m (cadr ymd))
         (d (caddr ymd)))
+    (string-append
+      (number->string y) "-"
+      (number->string m) "-"
+      (number->string d))))
 
 
 (define (string->ymd s)
@@ -276,6 +281,78 @@
 
 
 ;;; ============================================================================
+;;; --  PROMPT FUNCTIONS  ------------------------------------------------------
+
+(define (prompt-for-string msg . default)
+  (if (null? default)
+    (display (string-append msg ": "))
+    (display (string-append msg " [" (car default) "]: "))))
+
+(define (prompt-for-yesno msg . default)
+  (if (null? default)
+    (prompt-for-string msg)
+    (let ((defstring
+            (if (car default) "Y/n" "y/N")))
+      (prompt-for-string msg defstring))))
+
+(define (prompt-for-date msg)
+  (let* ((year (get-default-year))
+         (month (if year (get-default-year) #f))
+         (default-string
+           (if month
+             (sprintf "~A-~A" year month)
+             (if year
+               (number->string year)
+               #f))))
+    (if default-string
+      (prompt-for-string msg default-string)
+      (prompt-for-string msg))))
+
+
+;; Making this a closure allows for paging
+(define (choice-menu head-msg prompt-msg choices)
+  (let* ((page 0)
+         (len (length choices))
+         (pages (quotient len +screen-lines+))
+         (show-page
+           (lambda ()
+             (if (> page pages)
+               #f
+               (let* ((start (* page +screen-lines+))
+                      (end (min (+ start +screen-lines+) len)))
+                 (let loop ((i start))
+                   (if (>= i end)
+                     (begin
+                       (newline)
+                       (display (string-append prompt-msg ": ")))
+                     (begin
+                       (let ((new-i (+ 1 i)))
+                         (print new-i ") " (list-ref choices i))
+                         (loop new-i))))))))))
+    (lambda (cmd)
+      (case cmd
+        ((start)
+         (print head-msg)
+         (newline)
+         (show-page))
+        ((next)
+         (when (< page pages)
+           (set! page (+ page 1))
+           (show-page)))
+        ((previous)
+         (when (> page 0)
+           (set! page (- page 1))
+           (show-page)))))))
+
+
+(define (loop-prompt)
+  (display "Press RETURN to repeat, or 'q' to quit: "))
+
+;;; ============================================================================
+
+
+
+;;; ============================================================================
 ;;; --  ENVIRONMENT SETUP  -----------------------------------------------------
 
 (define (set-recorder! #!optional (recorder 'default) #!key (tag "@data"))
@@ -391,80 +468,6 @@
 (define (set-appname name)
   (*app-name* name))
 
-
-;;; ============================================================================
-
-
-
-;;; ============================================================================
-;;; --  PROMPT FUNCTIONS  ------------------------------------------------------
-
-(define (prompt-for-string msg . default)
-  (if (null? default)
-    (display (string-append msg ": "))
-    (display (string-append msg " [" (car default) "]: "))))
-
-(define (prompt-for-yesno msg . default)
-  (if (null? default)
-    (prompt-for-string msg)
-    (let ((defstring
-            (if (car default) "Y/n" "y/N")))
-      (prompt-for-string msg defstring))))
-
-(define (prompt-for-date msg)
-  (let* ((year (get-default-year))
-         (month (if year (get-default-year) #f))
-         (default-string
-           (if month
-             (sprintf "~A-~A" year month)
-             (if year
-               (number->string year)
-               #f))))
-    (if default-string
-      (prompt-for-string msg default-string)
-      (prompt-for-string msg))))
-
-           )
-
-
-;; Making this a closure allows for paging
-(define (choice-menu head-msg prompt-msg choices)
-  (let* ((page 0)
-         (len (length choices))
-         (pages (quotient len +screen-lines+))
-         (show-page
-           (lambda ()
-             (if (> page pages)
-               #f
-               (let* ((start (* page +screen-lines+))
-                      (end (min (+ start +screen-lines+) len)))
-                 (let loop ((i start))
-                   (if (>= i end)
-                     (begin
-                       (newline)
-                       (display (string-append prompt-msg ": ")))
-                     (begin
-                       (let ((new-i (+ 1 i)))
-                         (print new-i ") " (list-ref choices i))
-                         (loop new-i))))))))))
-    (lambda (cmd)
-      (case cmd
-        ((start)
-         (print head-msg)
-         (newline)
-         (show-page))
-        ((next)
-         (when (< page pages)
-           (set! page (+ page 1))
-           (show-page)))
-        ((previous)
-         (when (> page 0)
-           (set! page (- page 1))
-           (show-page)))))))
-
-
-(define (loop-prompt)
-  (display "Press RETURN to repeat, or 'q' to quit: "))
 
 ;;; ============================================================================
 
