@@ -32,6 +32,10 @@
 
 (define *custom-loop-choice-function* (make-parameter #f))
 
+(define *all-data* (make-parameter (make-queue)))
+
+(define *current-data* (make-parameter '()))
+
 ;;; ============================================================================
 
 
@@ -45,7 +49,7 @@
 (define (set-loop-choice-function! f)
   (*custom-loop-choice-function* f))
 
-(define (default-get-input message #!optional (default #f))
+(define (make-prompt-reader message #!optional (default #f))
   (lambda ()
     (let* ((default-string
              (cond
@@ -64,12 +68,39 @@
             (else default))
           input)))))
 
-(define (get-loop-choice data)
+(define (make-validator match-fun #!optional (hint ""))
+  (lambda (data)
+    (let ((match-result (match-fun data)))
+      (if match-result
+        (cons #t match-result)
+        (begin
+          (print "Invalid data! " hint)
+          (cons #f data))))))
+
+(define (get-loop-choice)
   (let ((custom-fun (*custom-loop-choice-function*)))
     (if custom-fun
-      (custom-fun data)
-      (let ((input ((default-get-input "Finished one round. Press [RETURN] to start again, or 'q' to quit."))))
+      (custom-fun)
+      (let ((input ((make-prompt-reader "Finished one round. Press [RETURN] to start again, or 'q' to quit."))))
         (not (string=? (string-downcase input) "q"))))))
+
+(define (add-to-current-data key value)
+  (*current-data* (cons (cons key value) (*current-data*))))
+
+(define (clear-current-data)
+  (*current-data* '()))
+
+(define (enqueue-current-data)
+  (print "enqueue-current-data")
+  (let ((q (*all-data*)))
+    (queue-add! q (*current-data*))
+    (clear-current-data)))
+
+(define (clear-all-data)
+  (*all-data* (make-queue)))
+
+(define (get-all-data)
+  (*all-data*))
 
 ;;; ============================================================================
 
@@ -86,14 +117,13 @@
                (symbol->string tag)))
          (get-input
            (or get-input
-               (default-get-input prompt-msg default)))
+               (make-prompt-reader prompt-msg default)))
          (validate
            (or validate
-               (lambda (s)
-                 (if (and (string? s)
-                          (string=? s ""))
-                   (cons #f s)
-                   (cons #t s)))))
+               (make-validator
+                 (lambda (s)
+                   (if (and (string? s) (string=? s "")) #f s))
+                 "Entry cannot be empty.")))
          (error-menu
            (cond
              ((and required (not allow-override))
@@ -106,17 +136,17 @@
                 "Press RETURN to try again, 's' to skip this item, or 'q' to quit.")))
          (get-error-choice
            (or get-error-choice
-               (default-get-input (string-append "Invalid data!" error-menu ": "))))
+               (make-prompt-reader (string-append error-menu ": "))))
          (record
            (or record
-               (lambda (data) #f)))
+               (lambda (data) (add-to-current-data tag data))))
          (action
            (or action
                (lambda (data) #f)))
          (choose-next
            (or choose-next
-               (lambda (data) 'QUIT))))
-    (lambda (previous-result)
+               (lambda (data) 'AUTO))))
+    (lambda ()
       (let loop ((input (get-input)))
         (let* ((vres (validate input))
                (valid (car vres)))
@@ -124,18 +154,17 @@
             (let ((data (cdr vres)))
               (record data)
               (action data)
-              (list (choose-next data) data))
+              (choose-next data))
             (let ((error-choice (get-error-choice)))
               (cond 
                 ((string=? error-choice "") (loop (get-input)))
-                ((string=? error-choice "s") (cons (choose-next 'NONE) 'NONE))
+                ((string=? error-choice "s") (choose-next 'NONE))
                 ((string=? error-choice "a")
                  (let ((data (cdr vres)))
                    (record data)
                    (action data)
-                   (cons (choose-next data) data)))
-                ((string=? error-choice "q") (cons 'QUIT 'NONE))))))))))
-               
+                   (choose-next data)))
+                ((string=? error-choice "q") 'QUIT)))))))))
       
 ;;; ============================================================================
 
@@ -144,40 +173,52 @@
 ;;; ============================================================================
 ;;; --  MAIN INTERACTION  ------------------------------------------------------
 
-(define (interact steps #!optional (final-action (lambda (data) #f)))
+(define (interact steps
+                  #!key
+                  (on-done (lambda () (enqueue-current-data) (get-all-data)))
+                  (on-quit (lambda () (exit)))
+                  (looping #f))
   (let* ((step-ids
           (map
             (lambda (elt) (car elt))
             steps))
          (get-next
            (lambda (id)
-             (let loop ((steps* step-ids)
+             (let loop ((ids* step-ids)
                         (found #f))
                (cond
-                 ((null? steps*) #f)
-                 (found (car steps*))
-                 ((eqv? id (car steps*)) (loop (cdr steps*) #t))
-                 (else (loop (cdr steps*) #f))))))
-         (normal-exit
-           (lambda (data)
-             (final-action data)
-             (exit)))
+                 ((null? ids*) #f)
+                 (found (car ids*))
+                 ((eqv? id (car ids*)) (loop (cdr ids*) #t))
+                 (else (loop (cdr ids*) #f))))))
          (start (car step-ids)))
-    (let loop* ((step-id start)
-                (last-data 'NONE))
+    (clear-all-data)
+    (let loop* ((step-id start))
       (let ((step (alist-ref step-id steps)))
         (if step
-          (let* ((result (step last-data))
-                 (signal (car result))
-                 (data (cadr result)))
+          (let* ((signal (step))) 
             (case signal
-              ((NEXT) (loop* (get-next step-id) data))
-              ((LOOP) (if (get-loop-choice data)
-                        (loop* start data)
-                        (normal-exit data)))
-              ((QUIT) (normal-exit data))
-              ((ABORT) (error data))
-              (else (loop* signal data))))
+              ((AUTO)
+               (let ((next (get-next step-id)))
+                 (if next
+                   (loop* next)
+                   (if (and looping (get-loop-choice))
+                     (begin
+                       (enqueue-current-data)
+                       (loop* start))
+                     (on-done)))))
+              ((LOOP)
+               (if (get-loop-choice)
+                 (begin
+                   (enqueue-current-data)
+                   (loop* start))
+                 (on-done)))
+              ((DONE)
+               (on-done))
+              ((QUIT)
+               (on-quit))
+              ((ABORT) (error))
+              (else (loop* signal))))
           (error
             (string-append "ERROR: Nonexistent step '"
                            (symbol->string step-id)
