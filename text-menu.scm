@@ -9,6 +9,8 @@
         (import srfi-13)
         (import extras)
         (import data-structures)
+        (import srfi-19)
+        (import irregex)
 
 
 ;;; ============================================================================
@@ -35,6 +37,32 @@
 (define *all-data* (make-parameter (make-queue)))
 
 (define *current-data* (make-parameter '()))
+
+;;; ============================================================================
+
+
+
+;;; ============================================================================
+;;; --  COMPILED REGULAR EXPRESSIONS  ------------------------------------------
+
+(define yes-rxp (irregex '("Yy")))
+
+(define no-rxp (irregex '("Nn")))
+
+(define blank-rxp (irregex '(* whitespace)))
+
+(define next-rxp (irregex '("Nn")))
+
+(define prev-rxp (irregex '("Pp")))
+
+(define quit-rxp (irregex '("Qq")))
+
+(define date-rxp
+  (irregex '(: (or
+                 (: (? (: (? (: (=> yr (** 1 4 numeric)) #\-)) (=> mo (** 1 2 numeric)) #\-)) (=> da (** 1 2 numeric)))
+                 (: (? (: (=> mo (** 1 2 numeric)) #\/)) (=> da (** 1 2 numeric)))
+                 (: (=> mo (** 1 2 numeric)) #\/ (=> da (** 1 2 numeric)) #\/ (=> yr (** 1 4 numeric)))
+                 ))))
 
 ;;; ============================================================================
 
@@ -76,6 +104,12 @@
         (begin
           (print "Invalid data! " hint)
           (cons #f data))))))
+
+(define (make-regex-validator pattern #!optional (hint ""))
+  (let* ((rxp (irregex pattern))
+         (match-fun
+           (lambda (input) (irregex-match rxp input))))
+    (make-validator match-fun hint)))
 
 (define (get-loop-choice)
   (let ((custom-fun (*custom-loop-choice-function*)))
@@ -183,12 +217,46 @@
 
 
 ;;; ============================================================================
-;;; --  NUMBER-STEP  -----------------------------------------------------------
+;;; --  NUMERIC-STEP  ----------------------------------------------------------
 
-(define (make-number-step tag #!key (prompt-msg #f) (default #f)
-                          (required #t) (allow-override #f) (get-error-choice #f)
-                          (record #f) (action #f) (choose-next #f))
-)
+(define (make-numeric-step tag 
+                           #!optional (type 'number)
+                           #!key (prompt-msg #f) (default #f)
+                           (required #t) (allow-override #f) (get-error-choice #f)
+                           (record #f) (action #f) (choose-next #f))
+  (let* ((pattern+hint
+           (case type
+             ((number)
+              '((: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
+                "Please enter a decimal number. Characters 0-9, ., and - are allowed."))
+             ((integer)
+              '((: (? #\-) (+ numeric))
+                "Please enter an integer. Characters 0-9 and - are allowed."))
+             ((posint)
+              '((: (/ #\1 #\9) (* numeric))
+                "Please enter a positive integer.
+                Characters 0-9 are allowed, and the number cannot be 0."))
+             ((nonnegint)
+              '((+ numeric)
+                "Please enter a non-negative integer. Characters 0-9 are allowed."))
+             ((float)
+              '((: (? #\-) (* numeric) #\. (+ numeric))
+                "Please enter a floating-point number."))
+             (else
+               (error
+                 (string-append (symbol->string type)
+                                " is not a recognized numeric type.")))))
+         (validate (apply make-regex-validator pattern+hint)))
+    (make-step tag
+               validate: validate
+               prompt-msg: prompt-msg
+               default: default
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
@@ -200,7 +268,18 @@
 (define (make-integer-step tag #!key (prompt-msg #f) (default #f)
                            (required #t) (allow-override #f) (get-error-choice #f)
                            (record #f) (action #f) (choose-next #f))
-)
+  (let ((validate-integer
+          (make-regex-validator '(: (? #\-) (+ numeric)))))
+    (make-step tag
+               validate: validate-integer  
+               prompt-msg: prompt-msg
+               default: default
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
@@ -212,7 +291,18 @@
 (define (make-posint-step tag #!key (prompt-msg #f) (default #f)
                           (required #t) (allow-override #f) (get-error-choice #f)
                           (record #f) (action #f) (choose-next #f))
-)
+  (let ((validate-posint
+          (make-regex-validator '(: (/ #\1 #\9) (* numeric)))))
+    (make-step tag
+               validate: validate-posint  
+               prompt-msg: prompt-msg
+               default: default
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
@@ -224,7 +314,20 @@
 (define (make-nonnegint-step tag #!key (prompt-msg #f) (default #f)
                              (required #t) (allow-override #f) (get-error-choice #f)
                              (record #f) (action #f) (choose-next #f))
-)
+  (let ((validate-nonnegint
+          (make-regex-validator
+            '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
+            "Please enter a decimal number.")))
+    (make-step tag
+               validate: validate-number  
+               prompt-msg: prompt-msg
+               default: default
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
@@ -236,7 +339,20 @@
 (define (make-float-step tag #!key (prompt-msg #f) (default #f)
                          (required #t) (allow-override #f) (get-error-choice #f)
                          (record #f) (action #f) (choose-next #f))
-)
+  (let ((validate-number
+          (make-regex-validator
+            '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
+            "Please enter a decimal number.")))
+    (make-step tag
+               validate: validate-number  
+               prompt-msg: prompt-msg
+               default: default
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
@@ -248,7 +364,21 @@
 (define (make-date-step tag #!key (prompt-msg #f) (default #f)
                         (required #t) (allow-override #f) (get-error-choice #f)
                         (record #f) (action #f) (choose-next #f))
-)
+  (let* ((date-rxp
+           (irregex
+             '(: (or
+                   (: (? (: (? (: (=> yr (** 1 4 numeric)) #\-)) (=> mo (** 1 2 numeric)) #\-)) (=> da (** 1 2 numeric)))
+                   (: (? (: (=> mo (** 1 2 numeric)) #\/)) (=> da (** 1 2 numeric)))
+                   (: (=> mo (** 1 2 numeric)) #\/ (=> da (** 1 2 numeric)) #\/ (=> yr (** 1 4 numeric)))))))
+         (string->ymd
+           (lambda (s)
+             (let ((match (irregex-match date-rxp s)))
+               (and match
+                    (list (string->number (irregex-match-substring match 'yr))
+                          (string->number (irregex-match-substring match 'mo))
+                          (string->number (irregex-match-substring match 'da)))))))
+
+         )))
 
 ;;; ============================================================================
 
