@@ -112,7 +112,7 @@
            (cond
              ((not extensible) #f)
              ((member? new-elt) #t)
-             (else (store new-elt)))))))))
+             (else (store new-elt) #t))))))))
 
 (define (make-prompt-reader message #!optional (default #f))
   (lambda ()
