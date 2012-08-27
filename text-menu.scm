@@ -10,7 +10,7 @@
         (import extras)
         (import data-structures)
         (import posix)
-        (import srfi-19-date)
+        ; (import srfi-19-date)
         (import irregex)
 
 
@@ -147,6 +147,14 @@
          (match-fun
            (lambda (input) (irregex-match rxp input))))
     (make-validator match-fun hint)))
+
+;; Because I can't seem to use the one from SRFI-19, and this is simple anyway.
+(define (leap-year? year)
+  (cond
+    ((= (modulo year 400) 0) #t) 
+    ((= (modulo year 100) 0) #f) 
+    ((= (modulo year 4) 0) #t) 
+    (else #f)))
 
 (define (get-loop-choice)
   (let ((custom-fun (*custom-loop-choice-function*)))
