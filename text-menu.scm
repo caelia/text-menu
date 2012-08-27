@@ -16,14 +16,30 @@
 ;;; ============================================================================
 ;;; --  SYNTAX DEFINITIONS  ----------------------------------------------------
 
+(define-syntax make-short-year-converter
+  (syntax-rules ()
+     ((_ (y0 y1 op addend) ...)
+      (lambda (y)
+        (cond
+          ((and (>= y y0) (<= y y1)) (op y addend))
+          ...
+          (else y))))
+     ((_ false) (lambda (y) y))
+
+(define-syntax map-step
+  (syntax-rules ()
+    ((_ (sym proc-or-sym))
+     (cons sym
+           (if (procedure? proc-or-sym)
+             proc-or-sym
+             (eval proc-or-sym))))
+    ((_ proc)
+     (cons (quote proc) proc))))
+
 (define-syntax steps
   (syntax-rules ()
-    ((_ (sym proc-or-sym) ...)
-       (list (cons sym
-                   (if (procedure? proc-or-sym)
-                     proc-or-sym
-                     (eval proc-or-sym)))
-             ...))))
+    ((_ step ...)
+     (list (map-step step) ...))))
 
 ;;; ============================================================================
 
@@ -56,13 +72,6 @@
 (define prev-rxp (irregex '("Pp")))
 
 (define quit-rxp (irregex '("Qq")))
-
-(define date-rxp
-  (irregex '(: (or
-                 (: (? (: (? (: (=> yr (** 1 4 numeric)) #\-)) (=> mo (** 1 2 numeric)) #\-)) (=> da (** 1 2 numeric)))
-                 (: (? (: (=> mo (** 1 2 numeric)) #\/)) (=> da (** 1 2 numeric)))
-                 (: (=> mo (** 1 2 numeric)) #\/ (=> da (** 1 2 numeric)) #\/ (=> yr (** 1 4 numeric)))
-                 ))))
 
 ;;; ============================================================================
 
@@ -361,9 +370,10 @@
 ;;; ============================================================================
 ;;; --  DATE-STEP  -------------------------------------------------------------
 
-(define (make-date-step tag #!key (prompt-msg #f) (default #f)
-                        (required #t) (allow-override #f) (get-error-choice #f)
-                        (record #f) (action #f) (choose-next #f))
+(define (make-date-step tag #!key (prompt-msg #f) (required #t) (allow-override #f)
+                        (short-year-rules '((60 99 + 1900) (0 59 + 2000))) (allowed-years '(1 3000))
+                        (default-year-rule 'last-or-current) (default-month-rule 'last-or-current)
+                        (get-error-choice #f) (record #f) (action #f) (choose-next #f))
   (let* ((date-rxp
            (irregex
              '(: (or
@@ -377,8 +387,95 @@
                     (list (string->number (irregex-match-substring match 'yr))
                           (string->number (irregex-match-substring match 'mo))
                           (string->number (irregex-match-substring match 'da)))))))
-
-         )))
+         (last-entered-year #f)
+         (last-entered-month #f)
+         (current-year
+           (lambda ()
+             (let ((t (seconds->local-time (current-seconds))))
+               (+ (vector-ref t 5) 1900))))
+         (current-month
+           (lambda ()
+             (let ((t (seconds->local-time (current-seconds))))
+               (+ (vector-ref t 4) 1))))
+         (get-default-year
+           (lambda ()
+             (case default-year-rule
+               ((last) last-entered-year)
+               ((current) (current-year))
+               ((last-or-current) (or last-entered-year (current-year)))
+               ((none) #f))))
+         (get-default-month
+           (lambda ()
+             (case default-month-rule
+               ((last) last-entered-month)
+               ((current) (current-month))
+               ((last-or-current) (or last-entered-month (current-month)))
+               ((none) #f))))
+         (short-conv
+           (make-short-year-converter short-year-rules))
+         (canonicalize-date
+           (lambda (ymd)
+             (let ((y (car ymd))
+                   (m (cadr ymd))
+                   (d (caddr ymd)))
+               (when (and y (not m))
+                 (error "Invalid date."))
+               (let ((y* (or y (get-default-year)))
+                     (m* (or m (get-default-month))))
+                 (when (or (not y*) (not m*))
+                   (error "Invalid date."))
+                 (let ((y**
+                         (if (>= y* 100)
+                           y*
+                           (short-conv))))
+                   (set! last-entered-year y**)
+                   (set! last-entered-month m*)
+                   (list y** m* d))))))
+         (date-validator
+           (lambda (ymd)
+             (let ((y (car ymd))
+                   (m (cadr ymd))
+                   (d (caddr ymd))
+                   (first
+                     (or (and (number? allowed-years) allowed-years)
+                         (car allowed-years)))
+                   (last
+                     (or (and (number? allowed-years) allowed-years)
+                         (cadr allowed-years))))
+               (cond
+                 ((< y first) #f)
+                 ((> y last) #f)
+                 ((< m 1) #f)
+                 ((> m 12) #f)
+                 ((< d 1) #f)
+                 ((and (memv m '(1 3 5 7 8 10 12)) (> d 31)) #f)
+                 ((and (memv m '(4 6 9 11)) (> d 30)) #f)
+                 ((and (= m 2) (not (leap-year? y)) (> d 28)) #f)
+                 ((and (= m 2) (> d 29)) #f)
+                 (else ymd)))))
+         (default-string
+           (let ((defyear (get-default-year))
+                 (defmonth (get-default-month)))
+             (cond
+               ((and defyear defmonth)
+                (sprintf "~A-~A" defyear defmonth))
+               (defyear
+                 (number->string defyear))
+               (else #f))))
+         (prompt-reader
+           (make-prompt-reader (prompt-msg or tag) default-string))
+         (input-getter
+           (lambda ()
+             (canonicalize-date (string->ymd (prompt-reader))))))
+    (make-step tag
+               get-input: input-getter
+               validate: date-validator  
+               required: required
+               allow-override: allow-override
+               get-error-choice: get-error-choice
+               record: record
+               action: action
+               choose-next: choose-next)))
 
 ;;; ============================================================================
 
