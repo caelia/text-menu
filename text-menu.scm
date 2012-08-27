@@ -13,7 +13,7 @@
         (import irregex)
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  SYNTAX DEFINITIONS  ----------------------------------------------------
 
 (define-syntax make-short-year-converter
@@ -41,12 +41,18 @@
     ((_ step ...)
      (list (map-step step) ...))))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  GLOBAL CONSTANTS & PARAMETERS  -----------------------------------------
+
+(define +screen-lines+
+  (let ((ts (terminal-size (current-output-port))))
+    (if (= ts 0)
+      20
+      (- ts 4))))
 
 (define *custom-loop-choice-function* (make-parameter #f))
 
@@ -54,11 +60,11 @@
 
 (define *current-data* (make-parameter '()))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  COMPILED REGULAR EXPRESSIONS  ------------------------------------------
 
 (define yes-rxp (irregex '("Yy")))
@@ -73,11 +79,11 @@
 
 (define quit-rxp (irregex '("Qq")))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  UTILITY FUNCTIONS  -----------------------------------------------------
 
 ;; Use this to define your own loop choice function. This function
@@ -120,6 +126,19 @@
            (lambda (input) (irregex-match rxp input))))
     (make-validator match-fun hint)))
 
+;;; XXX: this is compleatly borken
+(define (enum-validator enum #!optional (hint ""))
+  (let* ((choices (enum 'choices))
+         (extensible (enum 'extensible?))
+         (len (length choices))
+         (match-fun
+           (lambda (input)
+             (let ((idx (string->number resp)))
+               (if (>= idx len)
+                 #f
+                 (list-ref choices idx))))))
+
+
 (define (get-loop-choice)
   (let ((custom-fun (*custom-loop-choice-function*)))
     (if custom-fun
@@ -145,16 +164,15 @@
 (define (get-all-data)
   (*all-data*))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  GENERIC INTERACTION STEP GENERATOR  ------------------------------------
 
-(define (make-step tag #!key (prompt-msg #f) (default #f) (get-input #f)
-                   (validate #f) (required #t) (allow-override #f) (get-error-choice #f)
-                   (record #f) (action #f) (choose-next #f))
+(define (make-step tag prompt-msg default get-input validate required
+                   allow-override get-error-choice record action choose-next)
   (let* ((prompt-msg
            (or prompt-msg
                (symbol->string tag)))
@@ -209,30 +227,42 @@
                    (choose-next data)))
                 ((string=? error-choice "q") 'QUIT)))))))))
       
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
+;;; --  CUSTOM STEP GENERATOR  -------------------------------------------------
+
+(define (make-custom-step tag #!key (prompt-msg #f) (default #f) (get-input #f)
+                          (validate #f) (required #t) (allow-override #f)
+                          (get-error-choice #f) (record #f) (action #f)
+                          (choose-next #f))
+  (make-step tag prompt-msg default get-input validate required allow-override
+                          get-error-choice record action choose-next))
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  YESNO-STEP  ------------------------------------------------------------
 
 (define (make-yesno-step tag #!key (prompt-msg #f) (default #f)
                          (required #t) (get-error-choice #f)
                          (record #f) (action #f) (choose-next #f))
-)
+  (make-step tag prompt-msg default get-input validate required allow-override
+                          get-error-choice record action choose-next))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  NUMERIC-STEP  ----------------------------------------------------------
 
-(define (make-numeric-step tag 
-                           #!optional (type 'number)
-                           #!key (prompt-msg #f) (default #f)
-                           (required #t) (allow-override #f) (get-error-choice #f)
-                           (record #f) (action #f) (choose-next #f))
+(define (make-numeric-step tag type prompt-msg default required allow-override
+                           get-error-choice record action choose-next)
   (let* ((pattern+hint
            (case type
              ((number)
@@ -256,118 +286,66 @@
                  (string-append (symbol->string type)
                                 " is not a recognized numeric type.")))))
          (validate (apply make-regex-validator pattern+hint)))
-    (make-step tag
-               validate: validate
-               prompt-msg: prompt-msg
-               default: default
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+    (make-step tag prompt-msg default get-input validate required
+               allow-override get-error-choice record action choose-next)))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  INTEGER-STEP  ----------------------------------------------------------
 
 (define (make-integer-step tag #!key (prompt-msg #f) (default #f)
                            (required #t) (allow-override #f) (get-error-choice #f)
                            (record #f) (action #f) (choose-next #f))
-  (let ((validate-integer
-          (make-regex-validator '(: (? #\-) (+ numeric)))))
-    (make-step tag
-               validate: validate-integer  
-               prompt-msg: prompt-msg
-               default: default
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+  (make-numeric-step tag 'integer prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  POSITIVE-INTEGER-STEP  -------------------------------------------------
 
 (define (make-posint-step tag #!key (prompt-msg #f) (default #f)
                           (required #t) (allow-override #f) (get-error-choice #f)
                           (record #f) (action #f) (choose-next #f))
-  (let ((validate-posint
-          (make-regex-validator '(: (/ #\1 #\9) (* numeric)))))
-    (make-step tag
-               validate: validate-posint  
-               prompt-msg: prompt-msg
-               default: default
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+  (make-numeric-step tag 'posint prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  NON-NEGATIVE-INTEGER-STEP  ---------------------------------------------
 
 (define (make-nonnegint-step tag #!key (prompt-msg #f) (default #f)
                              (required #t) (allow-override #f) (get-error-choice #f)
                              (record #f) (action #f) (choose-next #f))
-  (let ((validate-nonnegint
-          (make-regex-validator
-            '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
-            "Please enter a decimal number.")))
-    (make-step tag
-               validate: validate-number  
-               prompt-msg: prompt-msg
-               default: default
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+  (make-numeric-step tag 'nonnegint prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  FLOAT-STEP  ------------------------------------------------------------
 
 (define (make-float-step tag #!key (prompt-msg #f) (default #f)
                          (required #t) (allow-override #f) (get-error-choice #f)
                          (record #f) (action #f) (choose-next #f))
-  (let ((validate-number
-          (make-regex-validator
-            '(: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
-            "Please enter a decimal number.")))
-    (make-step tag
-               validate: validate-number  
-               prompt-msg: prompt-msg
-               default: default
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+  (make-numeric-step tag 'float prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  DATE-STEP  -------------------------------------------------------------
 
 (define (make-date-step tag #!key (prompt-msg #f) (required #t) (allow-override #f)
@@ -467,33 +445,103 @@
          (input-getter
            (lambda ()
              (canonicalize-date (string->ymd (prompt-reader))))))
-    (make-step tag
-               get-input: input-getter
-               validate: date-validator  
-               required: required
-               allow-override: allow-override
-               get-error-choice: get-error-choice
-               record: record
-               action: action
-               choose-next: choose-next)))
+    (make-step tag prompt-msg default input-getter date-validator required
+               allow-override get-error-choice record action choose-next)))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  ENUM-STEP  -------------------------------------------------------------
 
-(define (make-enum-step tag enum #!key (prompt-msg #f) (required #t) 
-                        (get-error-choice #f) (record #f) (action #f)
-                        (choose-next #f))
-)
+(define (make-choice-menu head-msg prompt-msg choices)
+  (let* ((page 0)
+         (len (length choices))
+         (pages (quotient len +screen-lines+))
+         (show-page
+           (lambda ()
+             (if (> page pages)
+               #f
+               (let* ((start (* page +screen-lines+))
+                      (end (min (+ start +screen-lines+) len)))
+                 (let loop ((i start))
+                   (if (>= i end)
+                     (begin
+                       (newline)
+                       (display (string-append prompt-msg ": ")))
+                     (begin
+                       (let ((new-i (+ 1 i)))
+                         (print new-i ") " (list-ref choices i))
+                         (loop new-i))))))))))
+    (lambda (cmd)
+      (case cmd
+        ((start)
+         (print head-msg)
+         (newline)
+         (show-page))
+        ((next)
+         (when (< page pages)
+           (set! page (+ page 1))
+           (show-page)))
+        ((previous)
+         (when (> page 0)
+           (set! page (- page 1))
+           (show-page)))))))
 
-;;; ============================================================================
+(define (make-enum-step tag enum #!key (head-msg #f) (prompt-msg #f)
+                        (required #t) (get-error-choice #f) (record #f)
+                        (action #f) (choose-next #f) (extend-key "+"))
+  (let* ((choices (enum 'choices))
+         (len (length choices))
+         (extensible (enum 'extensible?))
+         (head-msg (or head-msg "Please choose from the following:"))
+         (extend-portion
+           (if extensible
+             (string-append " or '" extend-key "' to add a new item")
+             ""))
+         (prompt-msg
+           (or prompt-msg
+               (string-append "Enter the number of your choice"
+                              extend-portion
+                              ": ")))
+         (menu (make-choice-menu head-msg prompt-msg choices))
+         (get-input (lambda () (string-trim-both (read-line))))
+         (get-choice
+           (lambda ()
+             (let loop ((signal 'start))
+               (menu signal)
+               (let ((input (get-input)))
+                 (cond
+                   ((and (enum 'extensible?) (string=? input extend-key))
+                    (print "Enter new item: ")
+                    (let ((input* (get-input)))
+                      (enum 'add input*)
+                      input*))
+                   ((irregex-match next-rxp input)
+                    (loop 'next))
+                   ((irregex-match prev-rxp input)
+                    (loop 'previous))
+                   ((irregex-match posint-rxp input)
+                    (let ((idx (string->number input)))
+                      (and (< idx len)
+                           (list-ref choices idx))))
+                   (else #f))))))
+         (validate
+           (lambda (input)
+             (if input
+               (cons #t input)
+               (begin
+                 (print "Invalid input!")
+                 (cons #f ""))))))
+    (make-step tag #f #f get-choice validate required allow-override
+               get-error-choice record action choose-next)))
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  MAIN INTERACTION  ------------------------------------------------------
 
 (define (interact steps
@@ -547,13 +595,13 @@
                            (symbol->string step-id)
                            "' specified.")))))))
 
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
 )
 
 
 ;;; Section divider templates
 
-;;; ============================================================================
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; ----------------------------------------------------------------------------
-;;; ============================================================================
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
