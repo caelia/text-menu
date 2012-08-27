@@ -9,6 +9,7 @@
         (import srfi-13)
         (import extras)
         (import data-structures)
+        (import posix)
         (import srfi-19)
         (import irregex)
 
@@ -24,7 +25,7 @@
           ((and (>= y y0) (<= y y1)) (op y addend))
           ...
           (else y))))
-     ((_ false) (lambda (y) y))
+     ((_ false) (lambda (y) y))))
 
 (define-syntax map-step
   (syntax-rules ()
@@ -125,19 +126,6 @@
          (match-fun
            (lambda (input) (irregex-match rxp input))))
     (make-validator match-fun hint)))
-
-;;; XXX: this is compleatly borken
-(define (enum-validator enum #!optional (hint ""))
-  (let* ((choices (enum 'choices))
-         (extensible (enum 'extensible?))
-         (len (length choices))
-         (match-fun
-           (lambda (input)
-             (let ((idx (string->number resp)))
-               (if (>= idx len)
-                 #f
-                 (list-ref choices idx))))))
-
 
 (define (get-loop-choice)
   (let ((custom-fun (*custom-loop-choice-function*)))
@@ -251,8 +239,17 @@
 (define (make-yesno-step tag #!key (prompt-msg #f) (default #f)
                          (required #t) (get-error-choice #f)
                          (record #f) (action #f) (choose-next #f))
-  (make-step tag prompt-msg default get-input validate required allow-override
-                          get-error-choice record action choose-next))
+  (let ((default* (if default 'yes 'no))
+        (validate-yesno
+          (make-validator
+            (lambda (input)
+              (let ((input* (string-downcase input)))
+                (cond
+                  ((string=? input* "y") (cons #t #t))
+                  ((string=? input* "n") (cons #t #f))
+                  (else (cons #f #f))))))))
+    (make-step tag prompt-msg default* #f validate-yesno required #f
+               get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -286,8 +283,8 @@
                  (string-append (symbol->string type)
                                 " is not a recognized numeric type.")))))
          (validate (apply make-regex-validator pattern+hint)))
-    (make-step tag prompt-msg default get-input validate required
-               allow-override get-error-choice record action choose-next)))
+    (make-step tag prompt-msg default #f validate required allow-override
+               get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -405,7 +402,7 @@
                  (let ((y**
                          (if (>= y* 100)
                            y*
-                           (short-conv))))
+                           (short-conv y*))))
                    (set! last-entered-year y**)
                    (set! last-entered-month m*)
                    (list y** m* d))))))
@@ -441,11 +438,11 @@
                  (number->string defyear))
                (else #f))))
          (prompt-reader
-           (make-prompt-reader (prompt-msg or tag) default-string))
+           (make-prompt-reader (or prompt-msg tag) default-string))
          (input-getter
            (lambda ()
              (canonicalize-date (string->ymd (prompt-reader))))))
-    (make-step tag prompt-msg default input-getter date-validator required
+    (make-step tag prompt-msg default-string input-getter date-validator required
                allow-override get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
@@ -507,6 +504,7 @@
                               ": ")))
          (menu (make-choice-menu head-msg prompt-msg choices))
          (get-input (lambda () (string-trim-both (read-line))))
+         (posint-rxp (irregex '((: (/ #\1 #\9) (* numeric)))))
          (get-choice
            (lambda ()
              (let loop ((signal 'start))
@@ -534,8 +532,8 @@
                (begin
                  (print "Invalid input!")
                  (cons #f ""))))))
-    (make-step tag #f #f get-choice validate required allow-override
-               get-error-choice record action choose-next)))
+    (make-step tag #f #f get-choice validate required #f get-error-choice
+               record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
