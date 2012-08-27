@@ -10,7 +10,7 @@
         (import extras)
         (import data-structures)
         (import posix)
-        (import srfi-19)
+        (import srfi-19-date)
         (import irregex)
 
 
@@ -92,6 +92,27 @@
 ;; or #f to quit the program.
 (define (set-loop-choice-function! f)
   (*custom-loop-choice-function* f))
+
+(define (make-enum choices #!key (extensible #f) (store #f) (retrieve #f) (member? #f))
+  (let ((store
+          (or store
+              (lambda (item) (set! choices (append choices (list item))))))
+        (retrieve
+          (or retrieve
+              (lambda () choices)))
+        (member?
+          (or member?
+              (lambda (item) (memq item choices)))))
+    (lambda (cmd . args)
+      (case cmd
+        ((choices) (retrieve))
+        ((extensible?) extensible)
+        ((add)
+         (let ((new-elt (car args)))
+           (cond
+             ((not extensible) #f)
+             ((member? new-elt) #t)
+             (else (store new-elt)))))))))
 
 (define (make-prompt-reader message #!optional (default #f))
   (lambda ()
