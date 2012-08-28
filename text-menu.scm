@@ -1,6 +1,15 @@
 ;;; text-menu.scm -- Provides simple command-line menus and response handlers.
 ;;;   Copyright © 2012 by Matthew C. Gushee. See LICENSE file for details.
 
+(declare
+  ;(uses scheme)
+  ;(uses chicken)
+  (uses srfi-13)
+  (uses extras)
+  (uses data-structures)
+  (uses posix)
+  ; (uses srfi-19-date)
+  (uses irregex))
 
 (module text-menu *
 
@@ -55,6 +64,8 @@
       20
       (- ts 4))))
 
+(define *debug* (make-parameter #f))
+
 (define *custom-loop-choice-function* (make-parameter #f))
 
 (define *all-data* (make-parameter (make-queue)))
@@ -87,6 +98,11 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  UTILITY FUNCTIONS  -----------------------------------------------------
 
+
+(define (debug-msg msg)
+  (when (*debug*)
+    (print msg)))
+
 ;; Use this to define your own loop choice function. This function
 ;; should take one parameter, and must return #t to restart the loop
 ;; or #f to quit the program.
@@ -114,8 +130,8 @@
              ((member? new-elt) #t)
              (else (store new-elt) #t))))))))
 
-(define (make-prompt-reader #!optional (default #f))
-  (lambda (message)
+(define (make-prompt-reader message #!optional (default #f))
+  (lambda ()
     (let* ((default-string
              (cond
                ((not default) "")
@@ -135,17 +151,22 @@
 
 (define (make-validator match-fun #!optional (hint ""))
   (lambda (data)
+    (debug-msg "validator")
     (let ((match-result (match-fun data)))
       (if match-result
-        (cons #t match-result)
         (begin
+          (debug-msg "validator:#t")
+        (cons #t match-result)
+        )
+        (begin
+          (debug-msg "validator:#f")
           (print "Invalid data! " hint)
           (cons #f data))))))
 
 (define (make-regex-validator pattern #!optional (hint ""))
   (let* ((rxp (irregex pattern))
          (match-fun
-           (lambda (input) (irregex-match rxp input))))
+           (lambda (input) (if (irregex-match rxp input) input #f))))
     (make-validator match-fun hint)))
 
 ;; Because I can't seem to use the one from SRFI-19, and this is simple anyway.
@@ -164,7 +185,7 @@
         (not (string=? (string-downcase input) "q"))))))
 
 (define (add-to-current-data key value)
-  (queue-add! (*current-data*) (cons (cons key value))))
+  (queue-add! (*current-data*) (cons key value)))
 
 (define (clear-current-data)
   (*current-data* (make-queue)))
@@ -198,6 +219,7 @@
            (or validate
                (make-validator
                  (lambda (s)
+                   (debug-msg "[validator]:[default-match-fun]")
                    (if (and (string? s) (string=? s "")) #f s))
                  "Entry cannot be empty.")))
          (error-menu
@@ -212,7 +234,7 @@
                 "Press RETURN to try again, 's' to skip this item, or 'q' to quit.")))
          (get-error-choice
            (or get-error-choice
-               (make-prompt-reader (string-append error-menu ": "))))
+               (make-prompt-reader error-menu)))
          (record
            (or record
                (lambda (data) (add-to-current-data tag data))))
@@ -227,10 +249,15 @@
         (let* ((vres (validate input))
                (valid (car vres)))
           (if valid
+            (begin (debug-msg "[step:main loop] - input was valid")
             (let ((data (cdr vres)))
+              (debug-msg "next - record")
               (record data)
+              (debug-msg "recorded; next - action")
               (action data)
+              (debug-msg "action done; next - choose-next")
               (choose-next data))
+            )
             (let ((error-choice (get-error-choice)))
               (cond 
                 ((string=? error-choice "") (loop (get-input)))
@@ -247,6 +274,16 @@
 
 
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
+;;; --  SIMPLE STEP GENERATOR  -------------------------------------------------
+
+(define (make-simple-step tag #!key (prompt-msg #f) (default #f) (required #t))
+  (make-step tag prompt-msg default #f #f required #f #f #f #f #f))
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  CUSTOM STEP GENERATOR  -------------------------------------------------
 
 (define (make-custom-step tag #!key (prompt-msg #f) (default #f) (get-input #f)
@@ -254,7 +291,7 @@
                           (get-error-choice #f) (record #f) (action #f)
                           (choose-next #f))
   (make-step tag prompt-msg default get-input validate required allow-override
-                          get-error-choice record action choose-next))
+             get-error-choice record action choose-next))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -580,6 +617,7 @@
             steps))
          (get-next
            (lambda (id)
+             (debug-msg "interact:get-next")
              (let loop ((ids* step-ids)
                         (found #f))
                (cond
