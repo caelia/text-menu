@@ -59,7 +59,7 @@
 
 (define *all-data* (make-parameter (make-queue)))
 
-(define *current-data* (make-parameter '()))
+(define *current-data* (make-parameter (make-queue)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -114,8 +114,8 @@
              ((member? new-elt) #t)
              (else (store new-elt) #t))))))))
 
-(define (make-prompt-reader message #!optional (default #f))
-  (lambda ()
+(define (make-prompt-reader #!optional (default #f))
+  (lambda (message)
     (let* ((default-string
              (cond
                ((not default) "")
@@ -164,16 +164,14 @@
         (not (string=? (string-downcase input) "q"))))))
 
 (define (add-to-current-data key value)
-  (*current-data* (cons (cons key value) (*current-data*))))
+  (queue-add! (*current-data*) (cons (cons key value))))
 
 (define (clear-current-data)
-  (*current-data* '()))
+  (*current-data* (make-queue)))
 
 (define (enqueue-current-data)
-  (print "enqueue-current-data")
-  (let ((q (*all-data*)))
-    (queue-add! q (*current-data*))
-    (clear-current-data)))
+  (queue-add! (*all-data*) (*current-data*))
+  (clear-current-data))
 
 (define (clear-all-data)
   (*all-data* (make-queue)))
@@ -573,7 +571,7 @@
 
 (define (interact steps
                   #!key
-                  (on-done (lambda () (enqueue-current-data) (get-all-data)))
+                  (on-done (lambda () (enqueue-current-data)))
                   (on-quit (lambda () (exit)))
                   (looping #f))
   (let* ((step-ids
