@@ -109,7 +109,8 @@
 (define (set-loop-choice-function! f)
   (*custom-loop-choice-function* f))
 
-(define (make-enum choices #!key (extensible #f) (store #f) (retrieve #f) (member? #f))
+(define (make-enum #!optional (choices '()) #!key (extensible #f) (store #f)
+                   (retrieve #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
   (let ((store
           (or store
               (lambda (item) (set! choices (append choices (list item))))))
@@ -119,6 +120,8 @@
         (member?
           (or member?
               (lambda (item) (memq item choices)))))
+    (when (and exists? (not (exists?)) (not (null? choices)))
+      (init choices))
     (lambda (cmd . args)
       (case cmd
         ((choices) (retrieve))
