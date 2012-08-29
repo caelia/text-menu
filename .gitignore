@@ -3,3 +3,4 @@
 *.c
 *.import.scm
 examples/contacts1
+examples/dumfm
