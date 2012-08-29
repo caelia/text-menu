@@ -2,5 +2,9 @@
 *.o
 *.c
 *.import.scm
+examples/hello1
+examples/hello2
 examples/contacts1
+examples/contacts2
+examples/contacts3
 examples/dumfm
