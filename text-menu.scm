@@ -99,9 +99,9 @@
 ;;; --  UTILITY FUNCTIONS  -----------------------------------------------------
 
 
-(define (debug-msg msg)
+(define (debug-msg . msgs)
   (when (*debug*)
-    (print msg)))
+    (apply print msgs)))
 
 ;; Use this to define your own loop choice function. This function
 ;; should take one parameter, and must return #t to restart the loop
@@ -134,8 +134,9 @@
              (else (store new-elt) #t))))))))
 
 (define (make-prompt-reader message #!optional (default #f))
-  (lambda ()
-    (let* ((default-string
+  (lambda (#!optional new-default)
+    (let* ((default (or new-default default))
+           (default-string
              (cond
                ((not default) "")
                ((eqv? default 'yes) " [Y/n]")
@@ -145,11 +146,13 @@
       (display prompt-string)
       (let ((input (string-trim-both (read-line))))
         (if (string=? input "")
+          (begin (debug-msg "[prompt-reader]: input was blank") (debug-msg "Default: " default)
           (cond
             ((not default) "")
             ((eqv? default 'yes) "y")
             ((eqv? default 'no) "n")
             (else default))
+          )
           input)))))
 
 (define (make-validator match-fun #!optional (hint ""))
@@ -414,11 +417,23 @@
                    (: (=> mo (** 1 2 numeric)) #\/ (=> da (** 1 2 numeric)) #\/ (=> yr (** 1 4 numeric)))))))
          (string->ymd
            (lambda (s)
-             (let ((match (irregex-match date-rxp s)))
-               (and match
-                    (list (string->number (irregex-match-substring match 'yr))
-                          (string->number (irregex-match-substring match 'mo))
-                          (string->number (irregex-match-substring match 'da)))))))
+             (debug-msg "string->ymd")
+             (if (string=? s "")
+               (begin (debug-msg "blank input")
+               '(#f #f #f)
+               )
+               (let ((match (irregex-match date-rxp s)))
+                 (debug-msg "match result: " match)
+                 (if match
+                    (begin (debug-msg "matched")
+                    (let ((yr (irregex-match-substring match 'yr))
+                          (mo (irregex-match-substring match 'mo))
+                          (da (irregex-match-substring match 'da)))
+                      (list (and yr (string->number yr))
+                            (and mo (string->number mo))
+                            (and da (string->number da))))
+                    )
+                    '(#f #f #f))))))
          (last-entered-year #f)
          (last-entered-month #f)
          (current-year
@@ -431,11 +446,20 @@
                (+ (vector-ref t 4) 1))))
          (get-default-year
            (lambda ()
+             (debug-msg "get-default-year")
              (case default-year-rule
-               ((last) last-entered-year)
-               ((current) (current-year))
-               ((last-or-current) (or last-entered-year (current-year)))
-               ((none) #f))))
+               ((last)
+                (debug-msg "last - " last-entered-year)
+                last-entered-year)
+               ((current)
+                (debug-msg "current")
+                (current-year))
+               ((last-or-current)
+                (debug-msg "last-or-current - " last-entered-year)
+                (or last-entered-year (current-year)))
+               ((none)
+                (debug-msg "none")
+                #f))))
          (get-default-month
            (lambda ()
              (case default-month-rule
@@ -447,19 +471,21 @@
            (make-short-year-converter short-year-rules))
          (canonicalize-date
            (lambda (ymd)
+             (debug-msg "canonicalize-date")
              (let ((y (car ymd))
                    (m (cadr ymd))
                    (d (caddr ymd)))
                (when (and y (not m))
                  (error "Invalid date."))
+               (debug-msg "don't have year without month")
                (let ((y* (or y (get-default-year)))
                      (m* (or m (get-default-month))))
                  (when (or (not y*) (not m*))
                    (error "Invalid date."))
-                 (let ((y**
-                         (if (>= y* 100)
+                 (let ((y** (if (>= y* 100)
                            y*
                            (short-conv y*))))
+                   (debug-msg (string-append "Year: " (number->string y**)))
                    (set! last-entered-year y**)
                    (set! last-entered-month m*)
                    (list y** m* d))))))
@@ -473,33 +499,39 @@
                          (car allowed-years)))
                    (last
                      (or (and (number? allowed-years) allowed-years)
-                         (cadr allowed-years))))
+                         (cadr allowed-years)))
+                   (invalid-result
+                     (lambda ()
+                       (print "Invalid input!")
+                       (cons #f ymd))))
                (cond
-                 ((< y first) #f)
-                 ((> y last) #f)
-                 ((< m 1) #f)
-                 ((> m 12) #f)
-                 ((< d 1) #f)
-                 ((and (memv m '(1 3 5 7 8 10 12)) (> d 31)) #f)
-                 ((and (memv m '(4 6 9 11)) (> d 30)) #f)
-                 ((and (= m 2) (not (leap-year? y)) (> d 28)) #f)
-                 ((and (= m 2) (> d 29)) #f)
-                 (else ymd)))))
-         (default-string
-           (let ((defyear (get-default-year))
-                 (defmonth (get-default-month)))
-             (cond
-               ((and defyear defmonth)
-                (sprintf "~A-~A" defyear defmonth))
-               (defyear
-                 (number->string defyear))
-               (else #f))))
+                 ((not d) (invalid-result))
+                 ((< y first) (invalid-result))
+                 ((> y last) (invalid-result))
+                 ((< m 1) (invalid-result))
+                 ((> m 12) (invalid-result))
+                 ((< d 1) (invalid-result))
+                 ((and (memv m '(1 3 5 7 8 10 12)) (> d 31)) (invalid-result))
+                 ((and (memv m '(4 6 9 11)) (> d 30)) (invalid-result))
+                 ((and (= m 2) (not (leap-year? y)) (> d 28)) (invalid-result))
+                 ((and (= m 2) (> d 29)) (invalid-result))
+                 (else (cons #t ymd))))))
+         (get-default-string
+           (lambda ()
+             (let ((defyear (get-default-year))
+                   (defmonth (get-default-month)))
+               (cond
+                 ((and defyear defmonth)
+                  (sprintf "~A-~A" defyear defmonth))
+                 (defyear
+                   (number->string defyear))
+                 (else #f)))))
          (prompt-reader
-           (make-prompt-reader (or prompt-msg tag) default-string))
+           (make-prompt-reader (or prompt-msg (symbol->string tag))))
          (input-getter
            (lambda ()
-             (canonicalize-date (string->ymd (prompt-reader))))))
-    (make-step* tag prompt-msg default-string input-getter date-validator required
+             (canonicalize-date (string->ymd (prompt-reader (get-default-string)))))))
+    (make-step* tag prompt-msg #f input-getter date-validator required
                 allow-override get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
