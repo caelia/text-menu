@@ -12,13 +12,14 @@
 
 (define (print-csv row)
   (let loop ((fields '(first last phone email last-contact birthday)))
-    (let ((this-field (car fields))
-          (rest (cdr fields)))
-      (display (alist-ref this-field row))
-      (cond
-        ((null? rest) (newline))
-        ((null? (cdr rest)) (loop rest))
-        (else (display ",") (loop rest))))))
+    (let* ((this-field (car fields))
+           (rest (cdr fields))
+           (field-data (or (alist-ref this-field row) "")))
+      (display field-data)
+      (if (null? rest)
+        (newline)
+        (begin
+          (display ",") (loop rest))))))
 
 (let ((data (get-all-data)))
   (let loop ((row (queue-remove! data)))

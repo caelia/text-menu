@@ -211,6 +211,14 @@
 
 
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
+;;; --  FUNCTIONS USED IN STEPS  -----------------------------------------------
+
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  GENERIC INTERACTION STEP GENERATOR  ------------------------------------
 
 (define (make-step* tag prompt-msg default get-input validate required
@@ -241,9 +249,7 @@
          (get-error-choice
            (or get-error-choice
                (make-prompt-reader error-menu)))
-         (record
-           (or record
-               (lambda (data) (add-to-current-data tag data))))
+         (record (or record add-to-current-data))
          (action
            (or action
                (lambda (data) #f)))
@@ -258,7 +264,7 @@
             (begin (debug-msg "[step:main loop] - input was valid")
             (let ((data (cdr vres)))
               (debug-msg "next - record")
-              (record data)
+              (record tag data)
               (debug-msg "recorded; next - action")
               (action data)
               (debug-msg "action done; next - choose-next")
@@ -270,7 +276,7 @@
                 ((string=? error-choice "s") (choose-next 'NONE))
                 ((string=? error-choice "a")
                  (let ((data (cdr vres)))
-                   (record data)
+                   (record tag data)
                    (action data)
                    (choose-next data)))
                 ((string=? error-choice "q") 'QUIT)))))))))
@@ -634,6 +640,8 @@
                   #!key
                   (on-done (lambda () (enqueue-current-data)))
                   (on-quit (lambda () (exit)))
+                  (before-iteration (lambda () #f))
+                  (after-iteration (lambda () #f))
                   (looping #f))
   (let* ((step-ids
           (map
@@ -663,15 +671,20 @@
                    (if (and looping (get-loop-choice))
                      (begin
                        (enqueue-current-data)
+                       (after-iteration)
                        (loop* start))
-                     (on-done)))))
+                     (begin
+                       (after-iteration)
+                       (on-done))))))
               ((LOOP)
                (if (get-loop-choice)
                  (begin
                    (enqueue-current-data)
+                   (after-iteration)
                    (loop* start))
                  (on-done)))
               ((DONE)
+               (after-iteration)
                (on-done))
               ((QUIT)
                (on-quit))
@@ -692,3 +705,6 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; ----------------------------------------------------------------------------
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
