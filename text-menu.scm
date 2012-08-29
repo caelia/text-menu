@@ -567,11 +567,10 @@
          (prompt-msg
            (or prompt-msg
                (string-append "Enter the number of your choice"
-                              extend-portion
-                              ": ")))
+                              extend-portion)))
          (menu (make-choice-menu head-msg prompt-msg choices))
          (get-input (lambda () (string-trim-both (read-line))))
-         (posint-rxp (irregex '((: (/ #\1 #\9) (* numeric)))))
+         (posint-rxp (irregex '(: (/ #\1 #\9) (* numeric))))
          (get-choice
            (lambda ()
              (let loop ((signal 'start))
@@ -588,7 +587,7 @@
                    ((irregex-match prev-rxp input)
                     (loop 'previous))
                    ((irregex-match posint-rxp input)
-                    (let ((idx (string->number input)))
+                    (let ((idx (- (string->number input) 1)))
                       (and (< idx len)
                            (list-ref choices idx))))
                    (else #f))))))
