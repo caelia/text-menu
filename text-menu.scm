@@ -210,8 +210,8 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  GENERIC INTERACTION STEP GENERATOR  ------------------------------------
 
-(define (make-step tag prompt-msg default get-input validate required
-                   allow-override get-error-choice record action choose-next)
+(define (make-step* tag prompt-msg default get-input validate required
+                    allow-override get-error-choice record action choose-next)
   (let* ((prompt-msg
            (or prompt-msg
                (symbol->string tag)))
@@ -279,22 +279,12 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  SIMPLE STEP GENERATOR  -------------------------------------------------
 
-(define (make-simple-step tag #!key (prompt-msg #f) (default #f) (required #t))
-  (make-step tag prompt-msg default #f #f required #f #f #f #f #f))
-
-;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
-
-
-
-;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
-;;; --  CUSTOM STEP GENERATOR  -------------------------------------------------
-
-(define (make-custom-step tag #!key (prompt-msg #f) (default #f) (get-input #f)
+(define (make-step tag #!key (prompt-msg #f) (default #f) (get-input #f)
                           (validate #f) (required #t) (allow-override #f)
                           (get-error-choice #f) (record #f) (action #f)
                           (choose-next #f))
-  (make-step tag prompt-msg default get-input validate required allow-override
-             get-error-choice record action choose-next))
+  (make-step* tag prompt-msg default get-input validate required allow-override
+              get-error-choice record action choose-next))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -315,8 +305,8 @@
                   ((string=? input* "y") (cons #t #t))
                   ((string=? input* "n") (cons #t #f))
                   (else (cons #f #f))))))))
-    (make-step tag prompt-msg default* #f validate-yesno required #f
-               get-error-choice record action choose-next)))
+    (make-step* tag prompt-msg default* #f validate-yesno required #f
+                get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -350,8 +340,8 @@
                  (string-append (symbol->string type)
                                 " is not a recognized numeric type.")))))
          (validate (apply make-regex-validator pattern+hint)))
-    (make-step tag prompt-msg default #f validate required allow-override
-               get-error-choice record action choose-next)))
+    (make-step* tag prompt-msg default #f validate required allow-override
+                get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -509,8 +499,8 @@
          (input-getter
            (lambda ()
              (canonicalize-date (string->ymd (prompt-reader))))))
-    (make-step tag prompt-msg default-string input-getter date-validator required
-               allow-override get-error-choice record action choose-next)))
+    (make-step* tag prompt-msg default-string input-getter date-validator required
+                allow-override get-error-choice record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -598,8 +588,8 @@
                (begin
                  (print "Invalid input!")
                  (cons #f ""))))))
-    (make-step tag #f #f get-choice validate required #f get-error-choice
-               record action choose-next)))
+    (make-step* tag #f #f get-choice validate required #f get-error-choice
+                record action choose-next)))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
