@@ -64,7 +64,7 @@
       20
       (- ts 4))))
 
-(define *debug* (make-parameter #f))
+(define *text-menu-debug* (make-parameter #f))
 
 (define *custom-loop-choice-function* (make-parameter #f))
 
@@ -100,7 +100,7 @@
 
 
 (define (debug-msg . msgs)
-  (when (*debug*)
+  (when (*text-menu-debug*)
     (apply print msgs)))
 
 ;; Use this to define your own loop choice function. This function
@@ -120,8 +120,11 @@
         (member?
           (or member?
               (lambda (item) (memq item choices)))))
+    (debug-msg "make-enum")
     (when (and exists? (not (exists?)) (not (null? choices)))
+      (debug-msg "make-enum: need to initialize")
       (init choices))
+    (debug-msg "make-enum: init step done")
     (lambda (cmd . args)
       (case cmd
         ((choices) (retrieve))
