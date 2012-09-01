@@ -360,6 +360,19 @@
 
 
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
+;;; --  NUMBER-STEP  -----------------------------------------------------------
+
+(define (make-number-step tag #!key (prompt-msg #f) (default #f)
+                          (required #t) (allow-override #f) (get-error-choice #f)
+                          (record #f) (action #f) (choose-next #f))
+  (make-numeric-step tag 'number prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  INTEGER-STEP  ----------------------------------------------------------
 
 (define (make-integer-step tag #!key (prompt-msg #f) (default #f)
