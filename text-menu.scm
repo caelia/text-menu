@@ -670,8 +670,8 @@
                    (loop* next)
                    (if (and looping (get-loop-choice))
                      (begin
-                       (enqueue-current-data)
                        (after-iteration)
+                       (enqueue-current-data)
                        (loop* start))
                      (begin
                        (after-iteration)
@@ -679,8 +679,8 @@
               ((LOOP)
                (if (get-loop-choice)
                  (begin
-                   (enqueue-current-data)
                    (after-iteration)
+                   (enqueue-current-data)
                    (loop* start))
                  (on-done)))
               ((DONE)
