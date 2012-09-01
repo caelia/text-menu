@@ -335,7 +335,7 @@
   (let* ((pattern+hint
            (case type
              ((number)
-              '((: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
+              '((: (? #\-) (or (+ numeric) (: (* numeric) #\. (+ numeric))))
                 "Please enter a decimal number. Characters 0-9, ., and - are allowed."))
              ((integer)
               '((: (? #\-) (+ numeric))
