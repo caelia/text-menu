@@ -5,6 +5,7 @@
   ;(uses scheme)
   ;(uses chicken)
   (uses srfi-13)
+  (uses srfi-14)
   (uses extras)
   (uses data-structures)
   (uses posix)
@@ -16,6 +17,7 @@
         (import scheme)
         (import chicken)
         (import srfi-13)
+        (import srfi-14)
         (import extras)
         (import data-structures)
         (import posix)
@@ -109,32 +111,91 @@
 (define (set-loop-choice-function! f)
   (*custom-loop-choice-function* f))
 
-(define (make-enum #!optional (choices '()) #!key (extensible #f) (store #f)
+(define (replace-char s c1 c2)
+  (let ((chars (string->list s)))
+    (list->string
+      (map (lambda (c) (if (eq? c c1) c2 c)))
+      chars)))
+
+(define (auto-tag s elts)
+  (let* ((letter-or-space (char-set-union char-set:letter (char-set #\space)))
+         (s* (string-filter letter-or-space s))
+         (s** (string-downcase s*))
+         (words (string-split s**))
+         (exists?
+           (lambda (sym)
+             (let loop ((lst elts))
+               (cond
+                 ((null? lst) #f)
+                 ((equal? sym (car lst)) #t)
+                 (else (loop (cdr lst))))))))
+    (let loop ((basis (list (car words)))
+               (rest (cdr words)))
+      (let ((sym (string->symbol (string-join basis))))
+        (cond
+          ((not (exists? sym)) (cons sym s))
+          ((null? rest) #f)
+          (else (loop (append basis (list (car rest))) (cdr rest))))))))
+
+
+(define (make-enum* elements extensible store get-labels get-choices member? exists? init)
+  (debug-msg "make-enum")
+  (when (and exists? (not (exists?)) (not (null? elements)))
+    (debug-msg "make-enum: need to initialize")
+    (init elements))
+  (debug-msg "make-enum: init step done")
+  (lambda (cmd . args)
+    (case cmd
+      ((labels) (get-labels))
+      ((choices) (get-choices))
+      ((extensible?) extensible)
+      ((add)
+       (let ((new-elt (car args)))
+         (cond
+           ((not extensible) #f)
+           ((member? new-elt) #t)
+           (else (store new-elt) #t)))))))
+
+(define (make-enum #!optional (elements '()) #!key (extensible #f) (store #f)
                    (retrieve #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
   (let ((store
           (or store
-              (lambda (item) (set! choices (append choices (list item))))))
+              (lambda (item)
+                (set! elements (append elements (list item))))))
         (retrieve
           (or retrieve
-              (lambda () choices)))
+              (lambda () elements)))
         (member?
           (or member?
-              (lambda (item) (memq item choices)))))
-    (debug-msg "make-enum")
-    (when (and exists? (not (exists?)) (not (null? choices)))
-      (debug-msg "make-enum: need to initialize")
-      (init choices))
-    (debug-msg "make-enum: init step done")
-    (lambda (cmd . args)
-      (case cmd
-        ((choices) (retrieve))
-        ((extensible?) extensible)
-        ((add)
-         (let ((new-elt (car args)))
-           (cond
-             ((not extensible) #f)
-             ((member? new-elt) #t)
-             (else (store new-elt) #t))))))))
+              (lambda (item) (memq item elements)))))
+    (make-enum* elements extensible store retrieve retrieve member? exists? init)))
+
+(define (make-tagged-enum #!optional (elements '()) #!key (extensible #f) (store #f) (get-labels #f)
+                          (get-choices #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
+  (let ((store
+          (or store
+              (lambda (item)
+                (let ((item*
+                        (if (string? item)
+                          (auto-tag item elements)
+                          item)))
+                  (set! elements (append elements (list item*)))))))
+        (get-labels
+          (or get-labels
+              (lambda () (map (lambda (elt) (cdr elt)) elements))))
+        (get-choices
+          (or get-choices
+              (lambda () (map (lambda (elt) (car elt)) elements))))
+        (member?
+          (or member?
+              (lambda (tag)
+                (let loop ((lst elements))
+                  (cond
+                    ((null? lst) #f)
+                    ((equal? tag (car lst)) #t)
+                    (else (loop (cdr lst)))))))))
+    (make-enum* elements extensible store get-labels get-choices member? exists? init)))
+
 
 (define (make-prompt-reader message #!optional (default #f))
   (lambda (#!optional new-default)
@@ -566,9 +627,9 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  ENUM-STEP  -------------------------------------------------------------
 
-(define (make-choice-menu head-msg prompt-msg choices)
+(define (make-choice-menu head-msg prompt-msg labels)
   (let* ((page 0)
-         (len (length choices))
+         (len (length labels))
          (pages (quotient len +screen-lines+))
          (show-page
            (lambda ()
@@ -583,7 +644,7 @@
                        (display (string-append prompt-msg ": ")))
                      (begin
                        (let ((new-i (+ 1 i)))
-                         (print new-i ") " (list-ref choices i))
+                         (print new-i ") " (list-ref labels i))
                          (loop new-i))))))))))
     (lambda (cmd)
       (case cmd
@@ -603,7 +664,8 @@
 (define (make-enum-step tag enum #!key (head-msg #f) (prompt-msg #f)
                         (required #t) (get-error-choice #f) (record #f)
                         (action #f) (choose-next #f) (extend-key "+"))
-  (let* ((choices (enum 'choices))
+  (let* ((labels (enum 'labels))
+         (choices (enum 'choices))
          (len (length choices))
          (extensible (enum 'extensible?))
          (head-msg (or head-msg "Please choose from the following:"))
@@ -615,7 +677,7 @@
            (or prompt-msg
                (string-append "Enter the number of your choice"
                               extend-portion)))
-         (menu (make-choice-menu head-msg prompt-msg choices))
+         (menu (make-choice-menu head-msg prompt-msg labels))
          (get-input (lambda () (string-trim-both (read-line))))
          (posint-rxp (irregex '(: (/ #\1 #\9) (* numeric))))
          (get-choice
