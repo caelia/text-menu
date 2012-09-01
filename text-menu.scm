@@ -196,6 +196,9 @@
 (define (add-to-current-data key value)
   (queue-add! (*current-data*) (cons key value)))
 
+(define (get-current-data)
+  (*current-data*))
+
 (define (clear-current-data)
   (*current-data* (make-queue)))
 
@@ -622,7 +625,7 @@
                (let ((input (get-input)))
                  (cond
                    ((and (enum 'extensible?) (string=? input extend-key))
-                    (print "Enter new item: ")
+                    (display "Enter new item: ")
                     (let ((input* (get-input)))
                       (enum 'add input*)
                       input*))
