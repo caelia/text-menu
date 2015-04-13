@@ -4,7 +4,9 @@
 (declare
   ;(uses scheme)
   ;(uses chicken)
+  (uses srfi-1)
   (uses srfi-13)
+  (uses srfi-14)
   (uses extras)
   (uses data-structures)
   (uses posix)
@@ -15,7 +17,9 @@
 
         (import scheme)
         (import chicken)
+        (import srfi-1)
         (import srfi-13)
+        (import srfi-14)
         (import extras)
         (import data-structures)
         (import posix)
@@ -64,7 +68,7 @@
       20
       (- ts 4))))
 
-(define *debug* (make-parameter #f))
+(define *text-menu-debug* (make-parameter #f))
 
 (define *custom-loop-choice-function* (make-parameter #f))
 
@@ -100,7 +104,7 @@
 
 
 (define (debug-msg . msgs)
-  (when (*debug*)
+  (when (*text-menu-debug*)
     (apply print msgs)))
 
 ;; Use this to define your own loop choice function. This function
@@ -109,29 +113,126 @@
 (define (set-loop-choice-function! f)
   (*custom-loop-choice-function* f))
 
-(define (make-enum #!optional (choices '()) #!key (extensible #f) (store #f)
-                   (retrieve #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
-  (let ((store
-          (or store
-              (lambda (item) (set! choices (append choices (list item))))))
-        (retrieve
-          (or retrieve
-              (lambda () choices)))
-        (member?
-          (or member?
-              (lambda (item) (memq item choices)))))
-    (when (and exists? (not (exists?)) (not (null? choices)))
-      (init choices))
-    (lambda (cmd . args)
-      (case cmd
-        ((choices) (retrieve))
-        ((extensible?) extensible)
-        ((add)
-         (let ((new-elt (car args)))
-           (cond
-             ((not extensible) #f)
-             ((member? new-elt) #t)
-             (else (store new-elt) #t))))))))
+(define (replace-char s c1 c2)
+  (let ((chars (string->list s)))
+    (list->string
+      (map (lambda (c) (if (eq? c c1) c2 c)))
+      chars)))
+
+(define (auto-tag s elts)
+  (let* ((letter-or-space (char-set-union char-set:letter (char-set #\space)))
+         (s* (string-filter letter-or-space s))
+         (s** (string-downcase s*))
+         (words (string-split s**))
+         (exists?
+           (lambda (sym)
+             (let loop ((lst elts))
+               (cond
+                 ((null? lst) #f)
+                 ((equal? sym (car lst)) #t)
+                 (else (loop (cdr lst))))))))
+    (let loop ((basis (list (car words)))
+               (rest (cdr words)))
+      (let ((sym (string->symbol (string-join basis))))
+        (cond
+          ((not (exists? sym)) (cons sym s))
+          ((null? rest) #f)
+          (else (loop (append basis (list (car rest))) (cdr rest))))))))
+
+
+(define (make-enum* elements default-index default-choice set-default! extensible store
+                    get-labels get-choices member? exists? init)
+  (debug-msg "make-enum")
+  (when (and exists? (not (exists?)) (not (null? elements)))
+    (debug-msg "make-enum: need to initialize")
+    (init elements))
+  (debug-msg "make-enum: init step done")
+  (lambda (cmd . args)
+    (case cmd
+      ((labels) (get-labels))
+      ((choices) (get-choices))
+      ((default-index) (default-index))
+      ((default-choice) (default-choice))
+      ((set-default!) (set-default! (car args)))
+      ((extensible?) extensible)
+      ((add)
+       (let ((new-elt (car args)))
+         (debug-msg "[ENUM]: adding ..." new-elt)
+         (cond
+           ((not extensible) #f)
+           ((member? new-elt) #t)
+           (else (store new-elt) #t)))))))
+
+(define (make-enum #!optional (elements '()) #!key (default #f) (dyn-default #f) (extensible #f)
+                   (store #f) (retrieve #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
+  (let ((default* default))
+    (let ((store
+            (or store
+                (lambda (item)
+                  (set! elements (append elements (list item))))))
+          (retrieve
+            (or retrieve
+                (lambda () elements)))
+          (member?
+            (or member?
+                (lambda (item) (memq item elements))))
+          (default-choice
+            (lambda () default*))
+          (default-index
+            (lambda ()
+              (if default*
+                (let ((idx (list-index (lambda (x) (string=? x default*)) elements)))
+                  (and idx (number->string (+ idx 1))))
+                #f)))
+          (set-default!
+            (if dyn-default
+              (lambda (new-val) (set! default* new-val))
+              (lambda (new-val) #f))))
+      (make-enum* elements default-index default-choice set-default! extensible store retrieve retrieve member? exists? init))))
+
+(define (make-tagged-enum #!optional (elements '()) #!key (default #f) (dyn-default #f) (extensible #f) (store #f)
+                          (get-labels #f) (get-choices #f) (member? #f) (exists? #f) (init (lambda (elts) #f)))
+  (let ((default* default))
+    (let ((store
+            (or store
+                (lambda (item)
+                  (let ((item*
+                          (if (string? item)
+                            (auto-tag item elements)
+                            item)))
+                    (set! elements (append elements (list item*)))))))
+          (get-labels
+            (or get-labels
+                (lambda () (map (lambda (elt) (cdr elt)) elements))))
+          (get-choices
+            (or get-choices
+                (lambda () (map (lambda (elt) (car elt)) elements))))
+          (member?
+            (or member?
+                (lambda (tag)
+                  (let loop ((lst elements))
+                    (cond
+                      ((null? lst) #f)
+                      ((equal? tag (car lst)) #t)
+                      (else (loop (cdr lst))))))))
+          (default-choice
+            (lambda () default*))
+          (default-index
+            (lambda ()
+              (if default*
+                (let loop ((idx 1)
+                           (lst elements))
+                  (cond
+                    ((equal? (caar lst) default*) idx)
+                    ((null? lst) (error "default value not in list"))
+                    (else (loop (+ idx 1) (cdr lst)))))
+                #f)))
+          (set-default!
+            (if dyn-default
+              (lambda (new-val) (set! default* new-val))
+              (lambda (new-val) #f))))
+      (make-enum* elements default-index default-choice set-default! extensible store get-labels get-choices member? exists? init))))
+
 
 (define (make-prompt-reader message #!optional (default #f))
   (lambda (#!optional new-default)
@@ -192,6 +293,9 @@
 
 (define (add-to-current-data key value)
   (queue-add! (*current-data*) (cons key value)))
+
+(define (get-current-data)
+  (*current-data*))
 
 (define (clear-current-data)
   (*current-data* (make-queue)))
@@ -292,6 +396,7 @@
                           (validate #f) (required #t) (allow-override #f)
                           (get-error-choice #f) (record #f) (action #f)
                           (choose-next #f))
+  (debug-msg "make-step")
   (make-step* tag prompt-msg default get-input validate required allow-override
               get-error-choice record action choose-next))
 
@@ -329,7 +434,7 @@
   (let* ((pattern+hint
            (case type
              ((number)
-              '((: (? #\-) (or (+ numeric) (* numeric) #\. (+ numeric)))
+              '((: (? #\-) (or (+ numeric) (: (* numeric) #\. (+ numeric))))
                 "Please enter a decimal number. Characters 0-9, ., and - are allowed."))
              ((integer)
               '((: (? #\-) (+ numeric))
@@ -351,6 +456,20 @@
          (validate (apply make-regex-validator pattern+hint)))
     (make-step* tag prompt-msg default #f validate required allow-override
                 get-error-choice record action choose-next)))
+
+;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+
+
+;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
+;;; --  NUMBER-STEP  -----------------------------------------------------------
+
+(define (make-number-step tag #!key (prompt-msg #f) (default #f)
+                          (required #t) (allow-override #f) (get-error-choice #f)
+                          (record #f) (action #f) (choose-next #f))
+  (debug-msg "make-number-step")
+  (make-numeric-step tag 'number prompt-msg default required allow-override
+                     get-error-choice record action choose-next))
 
 ;;; ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 
@@ -401,6 +520,7 @@
 (define (make-float-step tag #!key (prompt-msg #f) (default #f)
                          (required #t) (allow-override #f) (get-error-choice #f)
                          (record #f) (action #f) (choose-next #f))
+  (debug-msg "make-float-step")
   (make-numeric-step tag 'float prompt-msg default required allow-override
                      get-error-choice record action choose-next))
 
@@ -415,6 +535,7 @@
                         (short-year-rules '((60 99 + 1900) (0 59 + 2000))) (allowed-years '(1 3000))
                         (default-year-rule 'last-or-current) (default-month-rule 'last-or-current)
                         (get-error-choice #f) (record #f) (action #f) (choose-next #f))
+  (debug-msg "make-date-step")
   (let* ((date-rxp
            (irregex
              '(: (or
@@ -547,12 +668,12 @@
 ;;; [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[
 ;;; --  ENUM-STEP  -------------------------------------------------------------
 
-(define (make-choice-menu head-msg prompt-msg choices)
+(define (make-choice-menu head-msg labels)
   (let* ((page 0)
-         (len (length choices))
+         (len (length labels))
          (pages (quotient len +screen-lines+))
          (show-page
-           (lambda ()
+           (lambda (prompt-msg)
              (if (> page pages)
                #f
                (let* ((start (* page +screen-lines+))
@@ -564,61 +685,78 @@
                        (display (string-append prompt-msg ": ")))
                      (begin
                        (let ((new-i (+ 1 i)))
-                         (print new-i ") " (list-ref choices i))
+                         (print new-i ") " (list-ref labels i))
                          (loop new-i))))))))))
-    (lambda (cmd)
+    (lambda (cmd prompt)
       (case cmd
         ((start)
          (print head-msg)
          (newline)
-         (show-page))
+         (show-page prompt))
         ((next)
          (when (< page pages)
            (set! page (+ page 1))
-           (show-page)))
+           (show-page prompt)))
         ((previous)
          (when (> page 0)
            (set! page (- page 1))
-           (show-page)))))))
+           (show-page prompt)))))))
 
 (define (make-enum-step tag enum #!key (head-msg #f) (prompt-msg #f)
                         (required #t) (get-error-choice #f) (record #f)
                         (action #f) (choose-next #f) (extend-key "+"))
-  (let* ((choices (enum 'choices))
+  (debug-msg "make-enum-step")
+  (let* ((labels (enum 'labels))
+         (choices (enum 'choices))
          (len (length choices))
          (extensible (enum 'extensible?))
          (head-msg (or head-msg "Please choose from the following:"))
-         (extend-portion
+         (extend-string
            (if extensible
              (string-append " or '" extend-key "' to add a new item")
              ""))
-         (prompt-msg
-           (or prompt-msg
-               (string-append "Enter the number of your choice"
-                              extend-portion)))
-         (menu (make-choice-menu head-msg prompt-msg choices))
+         (menu (make-choice-menu head-msg labels))
          (get-input (lambda () (string-trim-both (read-line))))
          (posint-rxp (irregex '(: (/ #\1 #\9) (* numeric))))
          (get-choice
            (lambda ()
-             (let loop ((signal 'start))
-               (menu signal)
-               (let ((input (get-input)))
-                 (cond
-                   ((and (enum 'extensible?) (string=? input extend-key))
-                    (print "Enter new item: ")
-                    (let ((input* (get-input)))
-                      (enum 'add input*)
-                      input*))
-                   ((irregex-match next-rxp input)
-                    (loop 'next))
-                   ((irregex-match prev-rxp input)
-                    (loop 'previous))
-                   ((irregex-match posint-rxp input)
-                    (let ((idx (- (string->number input) 1)))
-                      (and (< idx len)
-                           (list-ref choices idx))))
-                   (else #f))))))
+             (debug-msg "[enum-step]:get-choice")
+             (let* ((default-idx (lambda () (enum 'default-index)))
+                    (default-string
+                      (let ((idx (default-idx)))
+                        (if idx
+                          (string-append " [Default: " idx "]")
+                          "")))
+                    (prompt-msg
+                      (or prompt-msg
+                          (string-append "Enter the number of your choice"
+                                         default-string 
+                                         extend-string))))
+               (debug-msg "[enum-step]:default-string" default-string)
+               (let loop ((signal 'start))
+                 (debug-msg "[enum-step]:looping")
+                 (menu signal prompt-msg)
+                 (let ((input (get-input)))
+                   (cond
+                     ((and (enum 'extensible?) (string=? input extend-key))
+                      (display "Enter new item: ")
+                      (let ((input* (get-input)))
+                        (enum 'add input*)
+                        input*))
+                     ((irregex-match next-rxp input)
+                      (loop 'next))
+                     ((irregex-match prev-rxp input)
+                      (loop 'previous))
+                     ((irregex-match posint-rxp input)
+                      (let* ((idx (- (string->number input) 1))
+                             (choice
+                               (and (< idx len)
+                                    (list-ref choices idx))))
+                        (when choice
+                          (enum 'set-default! choice))
+                        choice))
+                     (default-idx (enum 'default-choice))
+                     (else #f)))))))
          (validate
            (lambda (input)
              (if input
@@ -626,6 +764,7 @@
                (begin
                  (print "Invalid input!")
                  (cons #f ""))))))
+    (debug-msg "make-enum-step: let bindings done")
     (make-step* tag #f #f get-choice validate required #f get-error-choice
                 record action choose-next)))
 
@@ -670,8 +809,8 @@
                    (loop* next)
                    (if (and looping (get-loop-choice))
                      (begin
-                       (enqueue-current-data)
                        (after-iteration)
+                       (enqueue-current-data)
                        (loop* start))
                      (begin
                        (after-iteration)
@@ -679,8 +818,8 @@
               ((LOOP)
                (if (get-loop-choice)
                  (begin
-                   (enqueue-current-data)
                    (after-iteration)
+                   (enqueue-current-data)
                    (loop* start))
                  (on-done)))
               ((DONE)
